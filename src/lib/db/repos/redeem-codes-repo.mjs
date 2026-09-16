@@ -21,6 +21,12 @@ function rowToRec(row) {
     notes: row.notes,
     expires_at: row.expires_at,
     created_at: row.created_at,
+    // 024: multi-use batches. Without these the console shows every code as
+    // single-use and the exhaustion check reads 0 forever.
+    max_uses: Math.max(1, Number(row.max_uses) || 1),
+    used_count: Number(row.used_count) || 0,
+    batch: row.batch ?? null,
+    created_by: row.created_by ?? null,
   }
 }
 

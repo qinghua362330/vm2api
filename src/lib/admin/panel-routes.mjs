@@ -23,6 +23,9 @@ import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import { publicUserView } from './panel-users.mjs'
 import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
 import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
+import { BalanceLedger } from '../billing/balance-ledger.mjs'
+import { RedeemService } from '../billing/redeem-service.mjs'
+import { AnnouncementsRepo } from '../db/repos/announcements-repo.mjs'
 import {
   autoMigrateExhausted,
   checkUserSlotEgress,
@@ -668,6 +671,124 @@ export function createPanelHandler(ctx) {
           usageCache: getUsageCache(),
         })
         return json(res, 200, panel.ok(snapshot))
+      }
+      // ---- 余额 / 兑换码 / 公告 ----
+      // Balance only ever moves through BalanceLedger, so every route here that
+      // touches money writes an auditable row in the same transaction.
+      if (p === '/api/panel/billing/ledger' || p === '/api/panel/billing/adjust') {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const ledger = new BalanceLedger()
+        if (req.method === 'GET' && p === '/api/panel/billing/ledger') {
+          const userId = String(url.searchParams.get('user_id') || '').trim() || null
+          return json(
+            res,
+            200,
+            panel.ok({
+              entries: ledger.history({ userId, limit: Number(url.searchParams.get('limit')) || 100 }),
+              totals: ledger.totalsBySource(),
+            }),
+          )
+        }
+        if (req.method === 'POST' && p === '/api/panel/billing/adjust') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          const amount = Number(body.amount) || 0
+          const result =
+            amount >= 0
+              ? ledger.credit({ userId: body.user_id, amount, source: 'admin', notes: body.notes || `by ${ident.username || 'admin'}` })
+              : ledger.debit({ userId: body.user_id, amount: Math.abs(amount), source: 'admin', notes: body.notes || `by ${ident.username || 'admin'}`, allowNegative: body.allow_negative === true })
+          return json(res, result.ok ? 200 : 400, panel.ok(result))
+        }
+      }
+
+      if (p === '/api/panel/redeem' || p.startsWith('/api/panel/redeem/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const redeem = new RedeemService()
+        if (req.method === 'GET' && p === '/api/panel/redeem') {
+          return json(res, 200, panel.ok({ codes: redeem.overview() }))
+        }
+        if (req.method === 'POST' && p === '/api/panel/redeem') {
+          const body = await readBody(req, 128 * 1024).catch(() => ({}))
+          try {
+            const created = redeem.createBatch({
+              count: body.count,
+              value: body.value,
+              type: body.type,
+              maxUses: body.max_uses,
+              notes: body.notes ?? null,
+              expiresAt: body.expires_at ?? null,
+              batch: body.batch ?? null,
+              code: body.code ?? null,
+              createdBy: ident.username || 'admin',
+            })
+            return json(res, 200, panel.ok({ created: created.length, codes: created.map((c) => c.code) }))
+          } catch (error) {
+            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_redeem_batch' } })
+          }
+        }
+        const redeemId = p.match(/^\/api\/panel\/redeem\/(\d+)$/)
+        if (redeemId && req.method === 'DELETE') {
+          redeem.remove(Number(redeemId[1]))
+          return json(res, 200, panel.ok({ removed: Number(redeemId[1]) }))
+        }
+        const redeemCode = p.match(/^\/api\/panel\/redeem\/([^/]+)\/use$/)
+        if (redeemCode && req.method === 'POST') {
+          const body = await readBody(req, 16 * 1024).catch(() => ({}))
+          const result = redeem.redeem({
+            code: decodeURIComponent(redeemCode[1]),
+            userId: body.user_id,
+          })
+          return json(res, result.ok ? 200 : 400, panel.ok(result))
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
+
+      if (p === '/api/panel/announcements' || p.startsWith('/api/panel/announcements/')) {
+        const announcements = new AnnouncementsRepo()
+        const ident = panelIdentity(req)
+        const admin = ident.role === 'admin' || ident.role === 'super'
+        if (req.method === 'GET' && p === '/api/panel/announcements') {
+          if (admin && url.searchParams.get('all') === '1') {
+            return json(res, 200, panel.ok({ announcements: announcements.list() }))
+          }
+          return json(
+            res,
+            200,
+            panel.ok({
+              announcements: announcements.visible({
+                viewerId: req.panelUserId || null,
+                viewerRole: ident.role || 'user',
+              }),
+            }),
+          )
+        }
+        if (!admin) {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        if (req.method === 'POST' && p === '/api/panel/announcements') {
+          const body = await readBody(req, 128 * 1024).catch(() => ({}))
+          try {
+            return json(res, 200, panel.ok({ announcement: announcements.create({ ...body, created_by: ident.username || 'admin' }) }))
+          } catch (error) {
+            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_announcement' } })
+          }
+        }
+        const annId = p.match(/^\/api\/panel\/announcements\/(\d+)$/)
+        if (annId) {
+          if (req.method === 'PATCH' || req.method === 'PUT') {
+            const body = await readBody(req, 128 * 1024).catch(() => ({}))
+            return json(res, 200, panel.ok({ announcement: announcements.update(Number(annId[1]), body) }))
+          }
+          if (req.method === 'DELETE') {
+            return json(res, 200, panel.ok({ removed: announcements.remove(Number(annId[1])) }))
+          }
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
       // ---- 渠道 (distribution + pricing) ----
       // A channel groups buckets and prices them. It never selects an account:

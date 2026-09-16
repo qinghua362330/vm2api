@@ -15,6 +15,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  Ticket,
   Users,
 } from 'lucide-react'
 
@@ -29,6 +30,7 @@ export type ViewId =
   | 'egress'
   | 'users'
   | 'channels'
+  | 'redeem'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -50,6 +52,7 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   egress: '出口绑定',
   users: '用户',
   channels: '渠道',
+  redeem: '兑换码',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -76,6 +79,7 @@ export const NAV_ITEMS: {
   { id: 'egress', url: '/egress', icon: Network },
   { id: 'users', url: '/users', icon: Users },
   { id: 'channels', url: '/channels', icon: Layers },
+  { id: 'redeem', url: '/redeem', icon: Ticket },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },
