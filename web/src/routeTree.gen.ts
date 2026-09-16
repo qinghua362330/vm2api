@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedApiRouteImport } from './routes/_authenticated/api'
 import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
+import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedClusterRouteImport } from './routes/_authenticated/cluster'
 import { Route as AuthenticatedDatabaseRouteImport } from './routes/_authenticated/database'
 import { Route as AuthenticatedEgressRouteImport } from './routes/_authenticated/egress'
@@ -56,6 +57,11 @@ const AuthenticatedApiRoute = AuthenticatedApiRouteImport.update({
 const AuthenticatedBillingRoute = AuthenticatedBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedChannelsRoute = AuthenticatedChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedClusterRoute = AuthenticatedClusterRouteImport.update({
@@ -163,6 +169,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/api': typeof AuthenticatedApiRoute
   '/billing': typeof AuthenticatedBillingRoute
+  '/channels': typeof AuthenticatedChannelsRoute
   '/cluster': typeof AuthenticatedClusterRoute
   '/database': typeof AuthenticatedDatabaseRoute
   '/egress': typeof AuthenticatedEgressRoute
@@ -187,6 +194,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/api': typeof AuthenticatedApiRoute
   '/billing': typeof AuthenticatedBillingRoute
+  '/channels': typeof AuthenticatedChannelsRoute
   '/cluster': typeof AuthenticatedClusterRoute
   '/database': typeof AuthenticatedDatabaseRoute
   '/egress': typeof AuthenticatedEgressRoute
@@ -214,6 +222,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/api': typeof AuthenticatedApiRoute
   '/_authenticated/billing': typeof AuthenticatedBillingRoute
+  '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/cluster': typeof AuthenticatedClusterRoute
   '/_authenticated/database': typeof AuthenticatedDatabaseRoute
   '/_authenticated/egress': typeof AuthenticatedEgressRoute
@@ -242,6 +251,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/api'
     | '/billing'
+    | '/channels'
     | '/cluster'
     | '/database'
     | '/egress'
@@ -266,6 +276,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/api'
     | '/billing'
+    | '/channels'
     | '/cluster'
     | '/database'
     | '/egress'
@@ -292,6 +303,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authenticated/api'
     | '/_authenticated/billing'
+    | '/_authenticated/channels'
     | '/_authenticated/cluster'
     | '/_authenticated/database'
     | '/_authenticated/egress'
@@ -354,6 +366,13 @@ declare module '@tanstack/react-router' {
       path: '/billing'
       fullPath: '/billing'
       preLoaderRoute: typeof AuthenticatedBillingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/channels': {
+      id: '/_authenticated/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof AuthenticatedChannelsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/cluster': {
@@ -495,6 +514,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedApiRoute: typeof AuthenticatedApiRoute
   AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
+  AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedClusterRoute: typeof AuthenticatedClusterRoute
   AuthenticatedDatabaseRoute: typeof AuthenticatedDatabaseRoute
   AuthenticatedEgressRoute: typeof AuthenticatedEgressRoute
@@ -520,6 +540,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedApiRoute: AuthenticatedApiRoute,
   AuthenticatedBillingRoute: AuthenticatedBillingRoute,
+  AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedClusterRoute: AuthenticatedClusterRoute,
   AuthenticatedDatabaseRoute: AuthenticatedDatabaseRoute,
   AuthenticatedEgressRoute: AuthenticatedEgressRoute,

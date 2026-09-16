@@ -45,6 +45,7 @@ import { resolveInferenceBackend, runApiInference } from '../pool/api-protocol.m
 import { summarizeBody, redactHeaders, presentedApiKeyForLog } from '../admin/request-log.mjs'
 import { ownerScopeFromRequest } from '../admin/resource-owner.mjs'
 import { resolveUserDispatch } from '../pool/egress-binding.mjs'
+import { allowedEgressesForRequest } from '../pool/channel-distribution.mjs'
 import { buildEgressGates } from '../pool/egress-gates.mjs'
 import { listVms } from '../vm/vm-registry.mjs'
 import {
@@ -149,10 +150,22 @@ export function createHandleProtocol(deps) {
         loadVm: (id) => getVm(projectRoot, id),
         vms: fullFleet,
       })
+      // 渠道分发: the channel bounds which buckets this request may consume.
+      // It never picks an account — the bucket/session resolver below does that.
+      const channelScope = allowedEgressesForRequest(
+        { apiKeyRecord: req.apiKeyRecord, userId, userBucketEgressIds: resolved?.allowedEgressIds || [] },
+      )
+      const allowed = channelScope.allowedEgressIds
+      if (Array.isArray(allowed) && !allowed.length) {
+        // The channel can serve nothing for this user. Say so instead of quietly
+        // widening to the fleet.
+        return { preferVmId: null, allowedEgressIds: [], denied: channelScope.reason }
+      }
+      const scoped = Array.isArray(allowed) && allowed.length ? allowed : resolved?.allowedEgressIds || []
       return {
         preferVmId: resolved?.slotId ? String(resolved.slotId) : null,
-        // The bucket set a session pin must stay inside. Null = unconstrained.
-        allowedEgressIds: resolved?.allowedEgressIds?.length ? resolved.allowedEgressIds : null,
+        // The bucket set a session pin must stay inside. Empty/null = unconstrained.
+        allowedEgressIds: scoped.length ? [...new Set(scoped)] : null,
       }
     } catch {
       // A binding problem must degrade to the ordinary pool pick, never fail.

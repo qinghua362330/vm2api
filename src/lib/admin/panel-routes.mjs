@@ -21,6 +21,8 @@ import { RefusalGuardsRepo } from '../db/repos/refusal-guards-repo.mjs'
 import { mergeNotifyConfig, publicNotifyConfig, publicRoutingNotify, sendNotifyTest } from './notify.mjs'
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import { publicUserView } from './panel-users.mjs'
+import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
+import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
 import {
   autoMigrateExhausted,
   checkUserSlotEgress,
@@ -666,6 +668,90 @@ export function createPanelHandler(ctx) {
           usageCache: getUsageCache(),
         })
         return json(res, 200, panel.ok(snapshot))
+      }
+      // ---- 渠道 (distribution + pricing) ----
+      // A channel groups buckets and prices them. It never selects an account:
+      // the egress/slot/session resolver owns dispatch.
+      if (p === '/api/panel/channels' || p.startsWith('/api/panel/channels/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const channels = new ChannelsRepo()
+
+        if (req.method === 'GET' && p === '/api/panel/channels') {
+          return json(res, 200, panel.ok({ channels: channelOverview({ repo: channels }) }))
+        }
+        if (req.method === 'POST' && p === '/api/panel/channels') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          try {
+            const channel = channels.create(body)
+            if (Array.isArray(body.buckets)) channels.setBuckets(channel.id, body.buckets)
+            if (Array.isArray(body.pricing)) channels.setPricing(channel.id, body.pricing)
+            return json(res, 200, panel.ok({ channel }))
+          } catch (error) {
+            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_channel' } })
+          }
+        }
+
+        const idMatch = p.match(/^\/api\/panel\/channels\/(\d+)(\/[a-z]+)?$/)
+        if (idMatch) {
+          const channelId = Number(idMatch[1])
+          const sub = idMatch[2] || ''
+          const channel = channels.get(channelId)
+          if (!channel) {
+            return json(res, 404, { ok: false, error: { message: 'channel not found', code: 'not_found' } })
+          }
+          if (req.method === 'GET' && !sub) {
+            return json(
+              res,
+              200,
+              panel.ok({
+                channel,
+                buckets: channels.listBucketIds(channelId),
+                users: channels.listUserIds(channelId),
+                pricing: channels.listPricing(channelId),
+              }),
+            )
+          }
+          if ((req.method === 'PATCH' || req.method === 'PUT') && !sub) {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            const updated = channels.update(channelId, body)
+            if (Array.isArray(body.buckets)) channels.setBuckets(channelId, body.buckets)
+            if (Array.isArray(body.pricing)) channels.setPricing(channelId, body.pricing)
+            if (Array.isArray(body.users)) {
+              for (const existing of channels.listUserIds(channelId)) channels.removeUser(channelId, existing)
+              for (const uid of body.users) channels.addUser(channelId, uid)
+            }
+            return json(res, 200, panel.ok({ channel: updated }))
+          }
+          if (req.method === 'DELETE' && !sub) {
+            channels.remove(channelId)
+            return json(res, 200, panel.ok({ removed: channelId }))
+          }
+          if (req.method === 'POST' && sub === '/buckets') {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            const result = channels.setBuckets(channelId, body.buckets || [])
+            return json(res, result.rejected?.length ? 409 : 200, panel.ok(result))
+          }
+          if (req.method === 'POST' && sub === '/pricing') {
+            const body = await readBody(req, 128 * 1024).catch(() => ({}))
+            return json(res, 200, panel.ok({ pricing: channels.setPricing(channelId, body.pricing || []) }))
+          }
+          if (req.method === 'POST' && sub === '/users') {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            const result = channels.addUser(channelId, body.user_id)
+            return json(res, 200, panel.ok(result))
+          }
+        }
+
+        // price lookup: which channel prices this model, for a given channel
+        if (req.method === 'GET' && p === '/api/panel/channels/price') {
+          const model = url.searchParams.get('model') || ''
+          const channelId = Number(url.searchParams.get('channel_id')) || null
+          return json(res, 200, panel.ok({ price: priceForModel(channelId, model, { repo: channels }) }))
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
       // ---- Users (tenant management) ----
       // Upstream stubbed this to 404 for the single-operator public build; the
