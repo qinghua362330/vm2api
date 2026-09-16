@@ -172,9 +172,13 @@ export class PoolScheduler {
     allowWait = true,
     pinVmId = null,
     ownerScope = PLATFORM_SCOPE,
+    preferVmId = null,
   } = {}) {
     const startedAt = Date.now()
     const pinned = !!String(pinVmId || '').trim()
+    // A soft preference (the user's bound slot) also earns the longer wait: the
+    // user's egress must not change just because their slot is momentarily busy.
+    const preferred = String(preferVmId || '').trim()
     const blocked = new Set(excluded)
     let stickyCleared = false
     const boundBefore = stickyKey ? this.stickyRouter?.resolve?.(stickyKey) : null
@@ -189,7 +193,8 @@ export class PoolScheduler {
     }
     const finalDeadline =
       Number(deadline) ||
-      startedAt + (stickyKey ? this.config.sticky_wait_timeout_ms : this.config.fallback_wait_timeout_ms)
+      startedAt +
+        (stickyKey || preferred ? this.config.sticky_wait_timeout_ms : this.config.fallback_wait_timeout_ms)
     for (;;) {
       if (signal?.aborted) throw makeAbortError()
       const candidates = await this.eligibleCandidates({
@@ -201,7 +206,7 @@ export class PoolScheduler {
         ownerScope,
       })
       const available = candidates.filter((candidate) => !candidate.busy)
-      const selected = this.pick(available, { model, stickyKey, eligible: candidates })
+      const selected = this.pick(available, { model, stickyKey, eligible: candidates, preferVmId: preferred })
       if (this.lastStickyCleared) stickyCleared = true
       if (selected) {
         const reservation = this.reserve(selected, { sessionKey: stickyKey, skipQuota: pinned })
@@ -577,13 +582,29 @@ export class PoolScheduler {
     return cleared
   }
 
-  pick(candidates, { model, stickyKey, eligible = candidates } = {}) {
+  pick(candidates, { model, stickyKey, eligible = candidates, preferVmId = null } = {}) {
     this.lastStickyCleared = false
     if (!candidates.length && !eligible?.length) return null
+    const poolAll = eligible || candidates
+
+    // The user's own egress binding outranks session stickiness: their IP is the
+    // stable identity, a session key is not. A busy bound slot is waited for
+    // rather than swapped, because swapping would put this request on a
+    // different egress. Nothing is unbound here — only the scheduler's sticky
+    // map is allowed to clear, so a miss simply falls through.
+    const prefer = preferVmId ? String(preferVmId).trim() : ''
+    if (prefer) {
+      const own = poolAll.find((candidate) => candidate.vmId === prefer)
+      if (own) {
+        if (!own.busy) return { ...own, selectionReason: 'user-binding' }
+        if (stickyShouldWait(own.waitReason)) return null
+      }
+    }
+
     const bound = stickyKey ? this.stickyRouter?.resolve?.(stickyKey) : null
     if (bound) {
       const match = (candidate) => candidate.vmId === bound.vmId && candidate.accountId === bound.accountId
-      const amongEligible = (eligible || candidates).find(match)
+      const amongEligible = poolAll.find(match)
       if (!amongEligible) {
         this.stickyRouter?.unbind?.(stickyKey)
         this.lastStickyCleared = true

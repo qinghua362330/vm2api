@@ -193,7 +193,9 @@ export function VmStatusBoard(props: Props) {
             <Field label='邮箱' compact>
               <SlotIdentity
                 vm={vm}
-                email={vm.email || acc.email}
+                // accountStatus() is a loose Record<string, unknown>, so narrow
+                // before handing the value to a typed prop.
+                email={vm.email || (typeof acc.email === 'string' ? acc.email : undefined)}
                 compact
               />
             </Field>

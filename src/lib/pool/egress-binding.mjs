@@ -441,6 +441,108 @@ export function resolveUserSlot(
 // ── automatic triggers ──────────────────────────────────────────────────────
 
 /**
+ * First assignment for a user who has no egress yet.
+ * Least-loaded egress with capacity, else the shared host IP. Returns the
+ * chosen egress so the caller can hand it straight to resolveUserSlot.
+ */
+export function assignUserEgress({ userId, vms = [], hostIdentity = resolveHostIdentity(), gates = {} } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
+  const uid = String(userId || '').trim()
+  if (!uid) return { ok: false, reason: 'user_required' }
+  const existing = repo.getEgressBinding(uid)
+  if (existing) return { ok: true, egressId: existing.egress_id, existing: true }
+
+  const served = pickLeastLoadedEgress({ vms, hostIdentity, gates }, { repo })
+  if (served.ok) {
+    const pinned = ensureUserEgress({ userId: uid, egressId: served.egressId, reason: 'auto' }, { repo })
+    if (pinned.ok) {
+      return { ok: true, egressId: served.egressId, slotId: served.slot.id, vm: served.slot.vm, created: true }
+    }
+    return pinned
+  }
+
+  const direct = pickDirectEgress({ vms, hostIdentity, gates }, { repo })
+  if (direct.ok) {
+    const pinned = ensureUserEgress({ userId: uid, egressId: direct.egressId, reason: 'auto' }, { repo })
+    if (pinned.ok) {
+      return { ok: true, egressId: direct.egressId, slotId: direct.slot.id, vm: direct.slot.vm, created: true, direct: true }
+    }
+    return pinned
+  }
+  return { ok: false, reason: 'no_egress_available', served: served.reason }
+}
+
+/**
+ * Dispatch entry point: the slot a user's request should prefer.
+ *
+ * Priority is user binding > session stickiness > failover, so the caller feeds
+ * this into the pool scheduler as a *soft* preference: the scheduler tries the
+ * bound slot first, and only falls through when it genuinely cannot serve.
+ *
+ * A user with no binding is assigned one here, which is what makes the binding
+ * real rather than something an operator has to seed by hand.
+ */
+export function resolveUserDispatch(
+  {
+    userId,
+    vms = [],
+    loadVm = null,
+    hostIdentity = resolveHostIdentity(),
+    gates = {},
+    reason = 'credential_dead',
+    allowFailover = true,
+    allowDirect = true,
+  } = {},
+  { repo = new EgressBindingsRepo(getDb()) } = {},
+) {
+  const uid = String(userId || '').trim()
+  if (!uid) return { ok: false, reason: 'user_required' }
+
+  // Steady state: the binding is set and only the bound slot matters. The
+  // scheduler needs the binding layer on the request path, so avoid reading the
+  // whole fleet (listVms returns summaries anyway; the gate needs full records).
+  const binding = repo.getEgressBinding(uid)
+  const bound = repo.getSlotBinding(uid)
+  if (binding && bound && typeof loadVm === 'function') {
+    const vm = loadVm(bound.slot_id)
+    const sameEgress = !!vm && slotEgressId(vm, { hostIdentity }) === binding.egress_id
+    const verdict = vm ? slotVerdict(vm, gates, { allowDirect: isDirectEgress(binding.egress_id) }) : null
+    if (sameEgress && verdict?.ok) {
+      return { ok: true, slotId: bound.slot_id, vm, egressId: binding.egress_id, migrated: false, fast: true }
+    }
+    if (verdict && !verdict.ok && String(verdict.reason).startsWith('transient:')) {
+      return {
+        ok: false,
+        reason: verdict.reason,
+        transient: true,
+        retry: true,
+        slotId: bound.slot_id,
+        egressId: binding.egress_id,
+      }
+    }
+  }
+
+  // Assignment or migration needs the whole fleet.
+  const all = typeof vms === 'function' ? vms() : vms
+  const assigned = binding
+    ? { ok: true, egressId: binding.egress_id, existing: true }
+    : assignUserEgress({ userId: uid, vms: all, hostIdentity, gates }, { repo })
+  if (!assigned.ok) return assigned
+
+  const resolved = resolveUserSlot(
+    { userId: uid, vms: all, hostIdentity, gates, reason, allowFailover, allowDirect },
+    { repo },
+  )
+  if (resolved.ok) {
+    return { ...resolved, egressId: resolved.egressId || assigned.egressId, assigned: !!assigned.created }
+  }
+  // Even when nothing can serve right now, the binding is what keeps the user's
+  // IP stable once something frees up.
+  return { ...resolved, egressId: assigned.egressId, assigned: !!assigned.created }
+}
+
+// ── automatic triggers ──────────────────────────────────────────────────────
+
+/**
  * Sweep every bound user and move the ones whose account cannot serve any more.
  * Call it from the pool tick; it is idempotent and cheap (bindings only).
  *

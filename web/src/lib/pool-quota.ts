@@ -91,14 +91,20 @@ export function poolQuota(vms: Vm[]): {
       id: vm.id,
       name,
       usedPct: usedPctOf(vm, '5h'),
-      probed: vm.utilization_5h != null || vm.codex_usage?.windows?.some((w) => w.id === '5h' && w.used_percent != null),
+      probed: Boolean(
+        vm.utilization_5h != null ||
+          vm.codex_usage?.windows?.some((w) => w.id === '5h' && w.used_percent != null)
+      ),
       resetAt: expiresAtToMs(vm.reset_5h),
     })
     w7.push({
       id: vm.id,
       name,
       usedPct: usedPctOf(vm, '7d'),
-      probed: vm.utilization_7d != null || vm.codex_usage?.windows?.some((w) => w.id === '7d' && w.used_percent != null),
+      probed: Boolean(
+        vm.utilization_7d != null ||
+          vm.codex_usage?.windows?.some((w) => w.id === '7d' && w.used_percent != null)
+      ),
       resetAt: expiresAtToMs(vm.reset_7d),
     })
     const fb = vm.fable || {}

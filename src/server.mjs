@@ -29,6 +29,7 @@ import {
 import { createKernelWatchdog, normalizeKernelWatchdogConfig } from './lib/transport/kernel-watchdog.mjs'
 
 import { createUsageProbeMonitor, normalizeUsageProbeConfig } from './lib/oauth/usage-probe-monitor.mjs'
+import { createEgressMigrationMonitor } from './lib/pool/egress-migration-monitor.mjs'
 import { normalizeOfficialCcConfig } from './lib/oauth/official-cc-bootstrap.mjs'
 import { invalidateLiveCredentialCache } from './lib/admin/panel-live-credentials.mjs'
 import { normalizeHealthProbeConfig, createHealthProbeMonitor, HEALTH_REAL_HEADER } from './lib/admin/health-probe.mjs'
@@ -144,6 +145,7 @@ let credentialRefreshMonitor = null
 let kernelWatchdog = null
 let usageProbeMonitor = null
 let notifyMonitor = null
+let egressMigrationMonitor = null
 
 let routingConfig = {}
 
@@ -428,6 +430,12 @@ notifyMonitor = createNotifyMonitor({
       requestLog,
     }),
 })
+egressMigrationMonitor = createEgressMigrationMonitor({
+  projectRoot: cfg.paths.project,
+  accountQuota,
+  runtimeRepo,
+  getConfig: () => routingConfig.egress_migration,
+})
 
 // --- Local backup service (auto schedule default ON; no S3 by design) ---
 const backupService = new BackupService({
@@ -470,6 +478,7 @@ backupService.onRestored((db) => {
   kernelWatchdog?.setConfig(normalizeKernelWatchdogConfig(routingConfig.kernel_watchdog))
   usageProbeMonitor?.setConfig(routingConfig.usage_probe)
   notifyMonitor?.setConfig(routingConfig.notify)
+  egressMigrationMonitor?.setConfig(routingConfig.egress_migration)
 
   initPoolRuntime()
   reloadActiveVm(cfg)
@@ -1057,6 +1066,11 @@ server.listen(cfg.port, cfg.host, () => {
     notifyMonitor?.start?.({ immediate: true })
   } catch (e) {
     console.warn('[notify] start failed', e?.message || e)
+  }
+  try {
+    egressMigrationMonitor?.start?.({ immediate: true })
+  } catch (e) {
+    console.warn('[egress-migration] start failed', e?.message || e)
   }
   const addr = server.address()
   const boundPort = typeof addr === 'object' && addr ? addr.port : cfg.port

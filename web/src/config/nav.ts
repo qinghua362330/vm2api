@@ -10,6 +10,7 @@ import {
   List,
   Monitor,
   Puzzle,
+  Network,
   ScrollText,
   Settings,
   Shield,
@@ -23,6 +24,7 @@ export type ViewId =
   | 'usage'
   | 'billing'
   | 'proxies'
+  | 'egress'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -41,6 +43,7 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   usage: '用量',
   billing: '计费',
   proxies: '代理池',
+  egress: '出口绑定',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -64,6 +67,7 @@ export const NAV_ITEMS: {
   { id: 'usage', url: '/usage', icon: LineChart },
   { id: 'billing', url: '/billing', icon: LineChart },
   { id: 'proxies', url: '/proxies', icon: Shield },
+  { id: 'egress', url: '/egress', icon: Network },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },

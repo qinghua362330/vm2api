@@ -1,4 +1,10 @@
 {
+  "egress_migration": {
+    "enabled": false,
+    "interval_sec": 60,
+    "run_on_start": true,
+    "dry_run": false
+  },
   "sticky": {
     "enabled": true,
     "mode": "conversation",

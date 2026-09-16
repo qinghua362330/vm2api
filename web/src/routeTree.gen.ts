@@ -16,6 +16,7 @@ import { Route as AuthenticatedApiRouteImport } from './routes/_authenticated/ap
 import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
 import { Route as AuthenticatedClusterRouteImport } from './routes/_authenticated/cluster'
 import { Route as AuthenticatedDatabaseRouteImport } from './routes/_authenticated/database'
+import { Route as AuthenticatedEgressRouteImport } from './routes/_authenticated/egress'
 import { Route as AuthenticatedImportRouteImport } from './routes/_authenticated/import'
 import { Route as AuthenticatedKeysRouteImport } from './routes/_authenticated/keys'
 import { Route as AuthenticatedLogsRouteImport } from './routes/_authenticated/logs'
@@ -64,6 +65,11 @@ const AuthenticatedClusterRoute = AuthenticatedClusterRouteImport.update({
 const AuthenticatedDatabaseRoute = AuthenticatedDatabaseRouteImport.update({
   id: '/database',
   path: '/database',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedEgressRoute = AuthenticatedEgressRouteImport.update({
+  id: '/egress',
+  path: '/egress',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedImportRoute = AuthenticatedImportRouteImport.update({
@@ -153,6 +159,7 @@ export interface FileRoutesByFullPath {
   '/billing': typeof AuthenticatedBillingRoute
   '/cluster': typeof AuthenticatedClusterRoute
   '/database': typeof AuthenticatedDatabaseRoute
+  '/egress': typeof AuthenticatedEgressRoute
   '/import': typeof AuthenticatedImportRoute
   '/keys': typeof AuthenticatedKeysRoute
   '/logs': typeof AuthenticatedLogsRoute
@@ -175,6 +182,7 @@ export interface FileRoutesByTo {
   '/billing': typeof AuthenticatedBillingRoute
   '/cluster': typeof AuthenticatedClusterRoute
   '/database': typeof AuthenticatedDatabaseRoute
+  '/egress': typeof AuthenticatedEgressRoute
   '/import': typeof AuthenticatedImportRoute
   '/keys': typeof AuthenticatedKeysRoute
   '/logs': typeof AuthenticatedLogsRoute
@@ -200,6 +208,7 @@ export interface FileRoutesById {
   '/_authenticated/billing': typeof AuthenticatedBillingRoute
   '/_authenticated/cluster': typeof AuthenticatedClusterRoute
   '/_authenticated/database': typeof AuthenticatedDatabaseRoute
+  '/_authenticated/egress': typeof AuthenticatedEgressRoute
   '/_authenticated/import': typeof AuthenticatedImportRoute
   '/_authenticated/keys': typeof AuthenticatedKeysRoute
   '/_authenticated/logs': typeof AuthenticatedLogsRoute
@@ -226,6 +235,7 @@ export interface FileRouteTypes {
     | '/billing'
     | '/cluster'
     | '/database'
+    | '/egress'
     | '/import'
     | '/keys'
     | '/logs'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
     | '/billing'
     | '/cluster'
     | '/database'
+    | '/egress'
     | '/import'
     | '/keys'
     | '/logs'
@@ -272,6 +283,7 @@ export interface FileRouteTypes {
     | '/_authenticated/billing'
     | '/_authenticated/cluster'
     | '/_authenticated/database'
+    | '/_authenticated/egress'
     | '/_authenticated/import'
     | '/_authenticated/keys'
     | '/_authenticated/logs'
@@ -344,6 +356,13 @@ declare module '@tanstack/react-router' {
       path: '/database'
       fullPath: '/database'
       preLoaderRoute: typeof AuthenticatedDatabaseRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/egress': {
+      id: '/_authenticated/egress'
+      path: '/egress'
+      fullPath: '/egress'
+      preLoaderRoute: typeof AuthenticatedEgressRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/import': {
@@ -459,6 +478,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
   AuthenticatedClusterRoute: typeof AuthenticatedClusterRoute
   AuthenticatedDatabaseRoute: typeof AuthenticatedDatabaseRoute
+  AuthenticatedEgressRoute: typeof AuthenticatedEgressRoute
   AuthenticatedImportRoute: typeof AuthenticatedImportRoute
   AuthenticatedKeysRoute: typeof AuthenticatedKeysRoute
   AuthenticatedLogsRoute: typeof AuthenticatedLogsRoute
@@ -482,6 +502,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBillingRoute: AuthenticatedBillingRoute,
   AuthenticatedClusterRoute: AuthenticatedClusterRoute,
   AuthenticatedDatabaseRoute: AuthenticatedDatabaseRoute,
+  AuthenticatedEgressRoute: AuthenticatedEgressRoute,
   AuthenticatedImportRoute: AuthenticatedImportRoute,
   AuthenticatedKeysRoute: AuthenticatedKeysRoute,
   AuthenticatedLogsRoute: AuthenticatedLogsRoute,

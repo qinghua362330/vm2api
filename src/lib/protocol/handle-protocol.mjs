@@ -44,6 +44,9 @@ import {
 import { resolveInferenceBackend, runApiInference } from '../pool/api-protocol.mjs'
 import { summarizeBody, redactHeaders, presentedApiKeyForLog } from '../admin/request-log.mjs'
 import { ownerScopeFromRequest } from '../admin/resource-owner.mjs'
+import { resolveUserDispatch } from '../pool/egress-binding.mjs'
+import { buildEgressGates } from '../pool/egress-gates.mjs'
+import { listVms } from '../vm/vm-registry.mjs'
 import {
   resolveInferenceEngine,
   resolveOfficialCcInference,
@@ -117,6 +120,39 @@ export function createHandleProtocol(deps) {
     typeof deps.getHealthMonitor === 'function' ? deps.getHealthMonitor() : deps.healthMonitor
   const getFailoverRunner = () =>
     typeof deps.getFailoverRunner === 'function' ? deps.getFailoverRunner() : deps.failoverRunner
+
+  /**
+   * The slot a tenant user's egress binding points at, or null when the caller is
+   * platform-scoped / has no binding yet.
+   *
+   * A first-time user is assigned an egress here, which is what makes the binding
+   * real rather than something an operator seeds by hand. Egress problems must
+   * degrade to the ordinary pool pick — never fail the request — so this is
+   * total: any error returns null and the scheduler decides.
+   */
+  function userBoundSlot(req, ownerScope) {
+    try {
+      const userId = ownerScope?.type === 'user' ? String(ownerScope.userId || '').trim() : ''
+      if (!userId) return null
+      const projectRoot = cfg.paths.project
+      const gates = buildEgressGates({ quota: accountQuota, runtimeRepo: accountQuota?.runtimeRepo })
+      const fullFleet = () =>
+        listVms(projectRoot)
+          .map((summary) => getVm(projectRoot, summary.id))
+          .filter(Boolean)
+      const resolved = resolveUserDispatch({
+        userId,
+        gates,
+        // Steady state reads only the bound slot; assignment and migration need
+        // the whole fleet, so that work is deferred behind a thunk.
+        loadVm: (id) => getVm(projectRoot, id),
+        vms: fullFleet,
+      })
+      return resolved?.ok ? String(resolved.slotId || '') || null : null
+    } catch {
+      return null
+    }
+  }
   function mapProtocolClientError(result, logBag, fallbackCode) {
     const originalCode = result?.body?.error?.code || fallbackCode
     const originalMessage = result?.body?.error?.message || null
@@ -700,6 +736,10 @@ export function createHandleProtocol(deps) {
     // Pin is panel test-chat / diagnostics (manage). Unpinned /v1 is dispatch.
     const ownerScope = pinVmId ? { type: 'any' } : ownerScopeFromRequest(req, apiKeyStore?.users)
     const healthReal = isHealthRealBypass(req.headers)
+    // Priority is user binding > session stickiness > failover. The bound slot is
+    // a soft preference: the scheduler tries it first and falls through only when
+    // it genuinely cannot serve, which is what keeps a user's egress IP stable.
+    const preferVmId = pinVmId ? null : userBoundSlot(req, ownerScope)
     let result
     try {
       result = await getFailoverRunner().run({
@@ -710,6 +750,7 @@ export function createHandleProtocol(deps) {
         stickyKeys,
         pinVmId,
         ownerScope,
+        preferVmId,
         countUsage: !healthReal,
         stream: upstreamStream,
         deliveryMode,
