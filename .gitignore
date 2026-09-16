@@ -35,3 +35,7 @@ web/dist/
 .impeccable/
 .idea/
 *.swp
+
+# local Go build cache (sandbox-safe)
+.gocache/
+.gomodcache/

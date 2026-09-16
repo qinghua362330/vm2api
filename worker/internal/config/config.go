@@ -78,7 +78,10 @@ type TelemetryIdentity struct {
 	LinuxDistroID      string           `json:"linux_distro_id"`
 	LinuxDistroVersion string           `json:"linux_distro_version"`
 	LinuxKernel        string           `json:"linux_kernel"`
-	Process            TelemetryProcess `json:"process"`
+	// DeploymentEnvironment mirrors src/lib/identity/telemetry-env.mjs
+	// deploymentEnvironmentFor(). Empty means "derive from platform".
+	DeploymentEnvironment string           `json:"deployment_environment"`
+	Process               TelemetryProcess `json:"process"`
 }
 
 type TelemetryProcess struct {

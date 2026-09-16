@@ -87,6 +87,27 @@ export function distroVersionFromPretty(pretty) {
   return m ? m[1] : ''
 }
 
+/**
+ * Canonical `deployment_environment`.
+ *
+ * Single source of truth for a value that used to be derived twice with
+ * different rules: this module returned '' for non-Linux platforms while the Go
+ * sidecar (`worker/internal/telemetry/event.go`) always produced
+ * `"unknown-" + platform`. The sidecar is what actually ships telemetry, so the
+ * Node path and the sidecar disagreed on every darwin/win32 persona.
+ *
+ * The rule is now uniform and mirrored in Go:
+ *     deployment_environment = explicit || `unknown-${platform}`
+ * An explicit value always wins, which lets the caller pin a captured
+ * real-machine value without touching either implementation.
+ */
+export function deploymentEnvironmentFor(platform, explicit = '') {
+  const override = str(explicit).trim()
+  if (override) return override
+  const p = str(platform).trim() || 'linux'
+  return `unknown-${p}`
+}
+
 export function buildFullEnvJson(id = {}) {
   const version = str(id.cli_version || id.version || OFFICIAL_CLI_VERSION)
   const platform = str(id.platform || 'linux')
@@ -110,7 +131,7 @@ export function buildFullEnvJson(id = {}) {
     version,
     version_base: str(id.version_base || versionBase(version)),
     build_time: str(id.build_time || ''),
-    deployment_environment: str(id.deployment_environment || (platform === 'linux' ? 'unknown-linux' : '')),
+    deployment_environment: deploymentEnvironmentFor(platform, id.deployment_environment),
     vcs: str(id.vcs || 'git'),
     github_event_name: '',
     github_actions_runner_environment: '',

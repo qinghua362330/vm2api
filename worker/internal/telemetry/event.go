@@ -130,8 +130,12 @@ func envBlock(id Identity) map[string]any {
 	if terminal == "" {
 		terminal = defaultTerminal
 	}
-	deploy := "unknown-linux"
-	if platform != "linux" {
+	// Must stay in lockstep with src/lib/identity/telemetry-env.mjs
+	// deploymentEnvironmentFor(): explicit value wins, otherwise `unknown-<platform>`.
+	// This previously disagreed with the Node path for every non-Linux persona
+	// (Node produced "", the sidecar produced "unknown-darwin").
+	deploy := strings.TrimSpace(id.DeploymentEnvironment)
+	if deploy == "" {
 		deploy = "unknown-" + platform
 	}
 	return map[string]any{

@@ -126,3 +126,40 @@ func TestInitEventOmitsEmptyOptionalFields(t *testing.T) {
 		t.Fatalf("is_ci=%v", env["is_ci"])
 	}
 }
+
+// deployment_environment used to be derived twice with different rules: the Node
+// path returned "" for non-Linux while this package always produced
+// "unknown-<platform>", so every darwin/win32 persona shipped a value the two
+// implementations disagreed on. The rule is now shared:
+//
+//	explicit || "unknown-" + platform
+//
+// mirrored in src/lib/identity/telemetry-env.mjs deploymentEnvironmentFor().
+// Keep these cases in lockstep with test/unit/telemetry-parity.test.mjs.
+func TestDeploymentEnvironmentMatchesNodeRule(t *testing.T) {
+	cases := []struct {
+		name     string
+		platform string
+		explicit string
+		want     string
+	}{
+		{name: "linux", platform: "linux", want: "unknown-linux"},
+		{name: "darwin", platform: "darwin", want: "unknown-darwin"},
+		{name: "win32", platform: "win32", want: "unknown-win32"},
+		{name: "empty platform defaults to linux", platform: "", want: "unknown-linux"},
+		{name: "explicit wins", platform: "linux", explicit: "prod", want: "prod"},
+		{name: "explicit wins on darwin", platform: "darwin", explicit: "unknown-linux", want: "unknown-linux"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := InitEvent(
+				Identity{Platform: tc.platform, DeploymentEnvironment: tc.explicit},
+				time.Unix(0, 0).UTC(),
+			)
+			env, _ := ev.EventData["env"].(map[string]any)
+			if got := env["deployment_environment"]; got != tc.want {
+				t.Fatalf("deployment_environment=%v want %q", got, tc.want)
+			}
+		})
+	}
+}

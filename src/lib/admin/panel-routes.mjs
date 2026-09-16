@@ -18,13 +18,16 @@ import { isRefusalGuardEnabled, REFUSAL_GUARD_SETTING } from '../core/refusal-gu
 import { RefusalGuardsRepo } from '../db/repos/refusal-guards-repo.mjs'
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import {
+  autoMigrateExhausted,
   checkUserSlotEgress,
   egressSharingReport,
   isDirectEgress,
   migrateUserWithinEgress,
   rebindUserEgress,
   releaseSlot,
+  slotVerdict,
 } from '../pool/egress-binding.mjs'
+import { buildEgressGates, coolSlot } from '../pool/egress-gates.mjs'
 import { SettingsRepo } from '../db/repos/settings-repo.mjs'
 import { parseCodexImportPayload, upsertCodexAccount, readCodexAccounts } from '../vm/codex-slot.mjs'
 import { generateAuthUrl, exchangeAuthCode, normalizeOauthFlavor } from '../oauth/oauth-auth-url.mjs'
@@ -3090,6 +3093,7 @@ export function createPanelHandler(ctx) {
         const repo = new EgressBindingsRepo()
         const vms = listVms(cfg.paths.project)
         const byId = new Map(vms.map((v) => [v.id, v]))
+        const gates = buildEgressGates({ quota: accountQuota, runtimeRepo: ctx.runtimeRepo })
 
         if (req.method === 'GET' && p === '/api/panel/egress-bindings') {
           const slotBindings = repo.listSlotBindings()
@@ -3097,6 +3101,7 @@ export function createPanelHandler(ctx) {
           const rows = repo.listEgressBindings().map((b) => {
             const slot = slotByUser.get(b.user_id) || null
             const vm = slot ? byId.get(slot.slot_id) || null : null
+            const verdict = vm ? slotVerdict(vm, gates, { allowDirect: isDirectEgress(b.egress_id) }) : null
             return {
               user_id: b.user_id,
               egress_id: b.egress_id,
@@ -3107,6 +3112,8 @@ export function createPanelHandler(ctx) {
               invariant_ok: vm ? checkUserSlotEgress({ userId: b.user_id, vms }, { repo }).ok : false,
               migrations: slot?.migrations ?? 0,
               last_reason: slot?.last_reason || null,
+              // live state: why the scheduler would or would not use this slot
+              slot_state: verdict ? (verdict.ok ? 'ready' : verdict.reason) : 'slot_missing',
               credential: vm
                 ? {
                     email: vm.email || vm.claude?.email || null,
@@ -3125,6 +3132,8 @@ export function createPanelHandler(ctx) {
               bindings: rows,
               sharing: egressSharingReport({ vms }, { repo }),
               unbound_slots: vms.filter((v) => !bound.has(v.id)).map((v) => v.id),
+              // a dry sweep shows what the next tick would move, before it moves
+              pending: autoMigrateExhausted({ vms, gates, dryRun: true }, { repo }).results,
             }),
           )
         }
@@ -3170,6 +3179,33 @@ export function createPanelHandler(ctx) {
             { repo },
           )
           return json(res, r.ok ? 200 : 409, panel.ok(r))
+        }
+
+        // Sweep: move every user whose account can no longer serve.
+        // Quota exhaustion (5h/7d) is the common trigger; concurrency and
+        // session limits are transient and never move a user.
+        if (req.method === 'POST' && p === '/api/panel/egress-bindings/sweep') {
+          const body = await readBody(req, 64 * 1024)
+          const dryRun = body.dry_run === true
+          const sweep = dryRun
+            ? autoMigrateExhausted({ vms, gates, dryRun: true }, { repo })
+            : autoMigrateExhausted({ vms, gates }, { repo })
+          return json(res, 200, panel.ok({ ...sweep, dry_run: dryRun }))
+        }
+
+        // Park a slot on a timed cooldown (sub2api-style account cooling).
+        if (req.method === 'POST' && p === '/api/panel/egress-bindings/cool') {
+          const body = await readBody(req, 64 * 1024)
+          const slotId = String(body.slot_id || '').trim()
+          const vm = byId.get(slotId) || null
+          const r = coolSlot({
+            slotId,
+            vm: vm || {},
+            minutes: body.minutes,
+            reason: body.reason || 'quota_exhausted',
+            runtimeRepo: ctx.runtimeRepo,
+          })
+          return json(res, r.ok ? 200 : 400, panel.ok(r))
         }
 
         if (req.method === 'POST' && p === '/api/panel/egress-bindings/release') {
