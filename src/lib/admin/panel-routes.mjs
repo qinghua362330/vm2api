@@ -28,6 +28,7 @@ import {
   slotVerdict,
 } from '../pool/egress-binding.mjs'
 import { buildEgressGates, coolSlot } from '../pool/egress-gates.mjs'
+import { hostEgressStatus, detectPublicIp } from '../vm/host-identity.mjs'
 import { SettingsRepo } from '../db/repos/settings-repo.mjs'
 import { parseCodexImportPayload, upsertCodexAccount, readCodexAccounts } from '../vm/codex-slot.mjs'
 import { generateAuthUrl, exchangeAuthCode, normalizeOauthFlavor } from '../oauth/oauth-auth-url.mjs'
@@ -3131,6 +3132,9 @@ export function createPanelHandler(ctx) {
             panel.ok({
               bindings: rows,
               sharing: egressSharingReport({ vms }, { repo }),
+              // The shared host IP is the platform's last resort: every slot with
+              // no proxy bound egresses from here, and it is shared on purpose.
+              direct_egress: hostEgressStatus({ vms }),
               unbound_slots: vms.filter((v) => !bound.has(v.id)).map((v) => v.id),
               // a dry sweep shows what the next tick would move, before it moves
               pending: autoMigrateExhausted({ vms, gates, dryRun: true }, { repo }).results,
@@ -3206,6 +3210,23 @@ export function createPanelHandler(ctx) {
             runtimeRepo: ctx.runtimeRepo,
           })
           return json(res, r.ok ? 200 : 400, panel.ok(r))
+        }
+
+        // Detect the VPS public IP so the shared host egress can be named.
+        // Deliberately not on the request path: pin it via VM2API_DIRECT_IDENTITY.
+        if (req.method === 'POST' && p === '/api/panel/egress-bindings/detect-host-ip') {
+          const detected = await detectPublicIp()
+          return json(
+            res,
+            200,
+            panel.ok({
+              ...detected,
+              current_identity: hostEgressStatus({ vms }).identity,
+              hint: detected.ok
+                ? 'set VM2API_DIRECT_IDENTITY to this value so the shared host egress is stable'
+                : 'detection failed; set VM2API_DIRECT_IDENTITY manually',
+            }),
+          )
         }
 
         if (req.method === 'POST' && p === '/api/panel/egress-bindings/release') {

@@ -24,6 +24,7 @@
 import { evaluateSlotGate } from './schedule-eligibility.mjs'
 import { getDb } from '../db/database.mjs'
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
+import { resolveHostIdentity } from '../vm/host-identity.mjs'
 
 export const DIRECT_EGRESS_PREFIX = 'direct:'
 
@@ -56,7 +57,7 @@ export function directEgressId(hostIdentity) {
   return id ? `${DIRECT_EGRESS_PREFIX}${id}` : ''
 }
 
-export function slotEgressId(vm = {}, { hostIdentity = 'host' } = {}) {
+export function slotEgressId(vm = {}, { hostIdentity = resolveHostIdentity() } = {}) {
   const proxyId = String(vm?.proxy?.id || vm?.proxy_id || '').trim()
   if (proxyId) return proxyId
   return directEgressId(vm?.egress_identity || hostIdentity)
@@ -156,7 +157,7 @@ function loadByEgress(repo) {
 }
 
 export function pickSlotInEgress(
-  { egressId, vms = [], exclude = [], hostIdentity = 'host', gates = {}, allowDirect = false } = {},
+  { egressId, vms = [], exclude = [], hostIdentity = resolveHostIdentity(), gates = {}, allowDirect = false } = {},
   { repo = new EgressBindingsRepo(getDb()) } = {},
 ) {
   const skip = new Set((exclude || []).filter(Boolean).map(String))
@@ -189,7 +190,7 @@ export function pickSlotInEgress(
  * recovery from the loss of one IP does not pile everyone onto a single other IP.
  */
 export function pickLeastLoadedEgress(
-  { vms = [], excludeEgress = [], hostIdentity = 'host', gates = {}, directEgress = null } = {},
+  { vms = [], excludeEgress = [], hostIdentity = resolveHostIdentity(), gates = {}, directEgress = null } = {},
   { repo = new EgressBindingsRepo(getDb()) } = {},
 ) {
   const skip = new Set((excludeEgress || []).filter(Boolean).map(String))
@@ -219,7 +220,7 @@ export function pickLeastLoadedEgress(
 }
 
 /** Last resort: the host's own IP. Only valid when a proxy-less slot can serve. */
-export function pickDirectEgress({ vms = [], hostIdentity = 'host', gates = {} } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
+export function pickDirectEgress({ vms = [], hostIdentity = resolveHostIdentity(), gates = {} } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
   const egressId = directEgressId(hostIdentity)
   if (!egressId) return { ok: false, reason: 'no_direct_egress' }
   const picked = pickSlotInEgress({ egressId, vms, hostIdentity, gates, allowDirect: true }, { repo })
@@ -237,7 +238,7 @@ export function migrateUser(
     userId,
     vms = [],
     egressId = null,
-    hostIdentity = 'host',
+    hostIdentity = resolveHostIdentity(),
     reason = 'credential_dead',
     fromSlot = null,
     detail = null,
@@ -366,7 +367,7 @@ export function resolveUserSlot(
     vms = [],
     egressId = null,
     reason = 'credential_dead',
-    hostIdentity = 'host',
+    hostIdentity = resolveHostIdentity(),
     gates = {},
     autoMigrate = true,
     allowFailover = true,
@@ -447,7 +448,7 @@ export function resolveUserSlot(
  * only hit a concurrency or session limit is deliberately left alone.
  */
 export function autoMigrateExhausted(
-  { vms = [], hostIdentity = 'host', gates = {}, allowFailover = true, allowDirect = true, onlyReason = null, dryRun = false } = {},
+  { vms = [], hostIdentity = resolveHostIdentity(), gates = {}, allowFailover = true, allowDirect = true, onlyReason = null, dryRun = false } = {},
   { repo = new EgressBindingsRepo(getDb()) } = {},
 ) {
   const byId = new Map(vms.map((vm) => [slotLabel(vm), vm]))
@@ -481,7 +482,7 @@ export function autoMigrateExhausted(
 
 // ── invariants + audit ──────────────────────────────────────────────────────
 
-export function checkUserSlotEgress({ userId, vms = [], hostIdentity = 'host' } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
+export function checkUserSlotEgress({ userId, vms = [], hostIdentity = resolveHostIdentity() } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
   const uid = String(userId || '').trim()
   const egress = repo.getEgressBinding(uid)
   const slot = repo.getSlotBinding(uid)
@@ -496,7 +497,7 @@ export function checkUserSlotEgress({ userId, vms = [], hostIdentity = 'host' } 
   return { ok: true, egressId: actual, slotId: slot.slot_id }
 }
 
-export function egressSharingReport({ vms = [], hostIdentity = 'host', minSlots = 2 } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
+export function egressSharingReport({ vms = [], hostIdentity = resolveHostIdentity(), minSlots = 2 } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
   const usersByEgress = repo.countUsersByEgress()
   const groups = new Map()
   for (const vm of vms) {
@@ -529,7 +530,7 @@ export function releaseSlot({ slotId, keepEgress = true } = {}, { repo = new Egr
 
 /** Admin rebind: an explicit IP change, audited as such. */
 export function rebindUserEgress(
-  { userId, egressId, vms = [], hostIdentity = 'host', gates = {}, boundBy = null } = {},
+  { userId, egressId, vms = [], hostIdentity = resolveHostIdentity(), gates = {}, boundBy = null } = {},
   { repo = new EgressBindingsRepo(getDb()) } = {},
 ) {
   const uid = String(userId || '').trim()
