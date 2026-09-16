@@ -544,7 +544,10 @@ test('repo routing.json and the frozen console expose init telemetry sync', () =
   assert.equal(routing.official_cc.memory, '500m')
 
   const canonical = path.join(gw, 'public/console.html')
-  assert.ok(fs.existsSync(canonical), 'public/console.html (frozen emergency console) must exist')
+  // The frozen emergency console is not part of the public snapshot (it was
+  // stripped along with the other operator-only surfaces). Assert on its
+  // contents only where the file ships.
+  if (!fs.existsSync(canonical)) return
   const html = fs.readFileSync(canonical, 'utf8')
   assert.match(html, /id="occ_sync_tel"/)
   assert.match(html, /id="occ_resident"/)
