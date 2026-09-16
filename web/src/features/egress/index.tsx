@@ -7,8 +7,27 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PageHeader } from '@/components/page-header'
 import { SectionSkeleton, TableSkeleton } from '@/components/page-skeletons'
 import { QueryGate } from '@/components/query-gate'
+import {
+  type ColumnFiltersState,
+  type SortingState,
+  type VisibilityState,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  useReactTable,
+} from '@tanstack/react-table'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { DataTablePagination, DataTableToolbar } from '@/components/data-table'
 import { EgressSummary } from './egress-summary'
-import { EgressTable } from './egress-table'
+import { useEgressColumns } from './egress-columns'
 import { EgressDetailDialog } from './egress-detail-dialog'
 import { egressBindingsQueryOptions } from './queries'
 
@@ -43,6 +62,11 @@ export function EgressPage() {
     for (const item of data.pending || []) map.set(item.user_id, item.reason)
     return map
   }, [data.pending])
+
+  const [sorting, setSorting] = useState<SortingState>([])
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [rowSelection, setRowSelection] = useState({})
 
   const refresh = () => qc.invalidateQueries({ queryKey: egressBindingsQueryOptions().queryKey })
 
@@ -119,6 +143,34 @@ export function EgressPage() {
   const busy =
     sweep.isPending || migrate.isPending || rebind.isPending || release.isPending || cool.isPending
 
+  const columns = useEgressColumns({
+    sessionsByEgress: data.sessions_by_egress || {},
+    pendingByUser,
+    busy,
+    onMigrate: (userId) => migrate.mutate(userId),
+    onRebind: (userId) => {
+      setRebindUser(userId)
+      setRebindTo('')
+    },
+    onRelease: setReleaseSlot,
+    onCool: (slotId) => cool.mutate(slotId),
+    onDetail: setDetailUser,
+  })
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    state: { sorting, columnFilters, columnVisibility, rowSelection },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    initialState: { pagination: { pageSize: 20 } },
+  })
+
   return (
     <PageHeader
       title='出口绑定'
@@ -155,20 +207,70 @@ export function EgressPage() {
         }
       >
         <EgressSummary data={data} />
-        <EgressTable
-          rows={rows}
-          busy={busy}
-          pendingByUser={pendingByUser}
-          sessionsByEgress={data.sessions_by_egress || {}}
-          onMigrate={(userId) => migrate.mutate(userId)}
-          onRebind={(userId) => {
-            setRebindUser(userId)
-            setRebindTo('')
-          }}
-          onRelease={setReleaseSlot}
-          onCool={(slotId) => cool.mutate(slotId)}
-          onDetail={setDetailUser}
-        />
+        <div className='space-y-3'>
+          <DataTableToolbar
+            table={table}
+            searchPlaceholder='搜索用户 / 出口 IP / 槽'
+            filters={[
+              {
+                columnId: 'egress_id',
+                title: '出口',
+                options: [
+                  { label: '代理 IP', value: 'proxy' },
+                  { label: '本机共享', value: 'direct' },
+                ],
+              },
+              {
+                columnId: 'slot_state',
+                title: '状态',
+                options: [
+                  { label: '可用', value: 'ready' },
+                  { label: '冷却中', value: 'cooldown' },
+                  { label: '额度用尽', value: 'quota' },
+                  { label: '槽已不存在', value: 'slot_missing' },
+                  { label: '无凭证', value: 'no_credential' },
+                ],
+              },
+            ]}
+          />
+          <div className='overflow-hidden rounded-md border'>
+            <Table density='compact'>
+              <TableHeader>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <TableHead key={header.id}>
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.length ? (
+                  table.getRowModel().rows.map((row) => (
+                    <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className='h-24 text-center'>
+                      还没有用户绑定。用户第一次调用 /v1 时会自动分配一个出口 IP。
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <DataTablePagination table={table} />
+        </div>
       </QueryGate>
 
       <EgressDetailDialog

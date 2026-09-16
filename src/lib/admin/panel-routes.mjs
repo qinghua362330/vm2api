@@ -20,6 +20,7 @@ import { RefusalGuardsRepo } from '../db/repos/refusal-guards-repo.mjs'
 // touched notify config threw "publicRoutingNotify is not defined" (500).
 import { mergeNotifyConfig, publicNotifyConfig, publicRoutingNotify, sendNotifyTest } from './notify.mjs'
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
+import { publicUserView } from './panel-users.mjs'
 import {
   autoMigrateExhausted,
   checkUserSlotEgress,
@@ -666,11 +667,149 @@ export function createPanelHandler(ctx) {
         })
         return json(res, 200, panel.ok(snapshot))
       }
-      if (p === '/api/panel/users' || /^\/api\/panel\/users\/[^/]+$/.test(p)) {
-        return json(res, 404, {
-          ok: false,
-          error: { message: 'user management is not available in this build', code: 'not_found' },
-        })
+      // ---- Users (tenant management) ----
+      // Upstream stubbed this to 404 for the single-operator public build; the
+      // data layer (PanelUserStore / UsersRepo) was always intact. Restored on
+      // top of it, with each user's egress binding joined in so the console can
+      // show 用户 · IP · 槽 · 凭证 in one row.
+      if (p === '/api/panel/users' || p.startsWith('/api/panel/users/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        // PanelUserStore already holds the UsersRepo, and the users table is
+        // where concurrency/balance/notes live (the panel view is a projection).
+        const usersRepo = panelUsers?.repo || ctx.usersRepo || null
+
+        const egressIndex = () => {
+          const repo = new EgressBindingsRepo()
+          const buckets = new Map()
+          for (const bucket of repo.listAllBuckets()) {
+            if (!buckets.has(bucket.user_id)) buckets.set(bucket.user_id, [])
+            buckets.get(bucket.user_id).push(bucket.egress_id)
+          }
+          const slots = new Map()
+          for (const binding of repo.listSlotBindings()) {
+            slots.set(binding.user_id, {
+              slot_id: binding.slot_id,
+              egress_id: binding.egress_id,
+              migrations: binding.migrations,
+              last_reason: binding.last_reason,
+            })
+          }
+          return { repo, buckets, slots }
+        }
+
+        if (req.method === 'GET' && p === '/api/panel/users') {
+          const q = url.searchParams
+          const search = String(q.get('search') || '').trim().toLowerCase()
+          const role = String(q.get('role') || '').trim().toLowerCase()
+          const status = String(q.get('status') || '').trim().toLowerCase()
+          const page = Math.max(1, Number(q.get('page')) || 1)
+          const pageSize = Math.min(200, Math.max(1, Number(q.get('page_size')) || 20))
+          const sortBy = String(q.get('sort_by') || 'created_at')
+          const sortOrder = String(q.get('sort_order') || 'desc') === 'asc' ? 'asc' : 'desc'
+
+          const { buckets, slots } = egressIndex()
+          let rows = panelUsers.list().map((rec) => ({
+            ...publicUserView(rec),
+            email: rec.email || null,
+            balance: Number(rec.balance) || 0,
+            concurrency: Number(rec.concurrency) || 0,
+            status: rec.status || (rec.enabled === false ? 'disabled' : 'active'),
+            notes: rec.notes || '',
+            last_active_at: rec.last_active_at || null,
+            egress: {
+              buckets: buckets.get(rec.id) || [],
+              slot: slots.get(rec.id) || null,
+            },
+          }))
+          if (search) {
+            rows = rows.filter((r) =>
+              [r.username, r.email, r.id, r.notes].some((v) => String(v || '').toLowerCase().includes(search)),
+            )
+          }
+          if (role) rows = rows.filter((r) => String(r.role || '').toLowerCase() === role)
+          if (status) rows = rows.filter((r) => String(r.status || '').toLowerCase() === status)
+          const dir = sortOrder === 'asc' ? 1 : -1
+          rows.sort((a, b) => {
+            const av = a[sortBy] ?? ''
+            const bv = b[sortBy] ?? ''
+            if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+            return String(av).localeCompare(String(bv)) * dir
+          })
+          const total = rows.length
+          const start = (page - 1) * pageSize
+          return json(res, 200, panel.ok({ users: rows.slice(start, start + pageSize), total, page, page_size: pageSize }))
+        }
+
+        if (req.method === 'POST' && p === '/api/panel/users') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          try {
+            const rec = panelUsers.create({
+              username: body.username,
+              password: body.password,
+              role: body.role || 'user',
+              enabled: body.status ? body.status === 'active' : body.enabled !== false,
+              vm_create_quota: body.vm_create_quota,
+            })
+            return json(res, 200, panel.ok({ user: publicUserView(rec) }))
+          } catch (error) {
+            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_user' } })
+          }
+        }
+
+        const userIdMatch = p.match(/^\/api\/panel\/users\/([^/]+)$/)
+        if (userIdMatch) {
+          const userId = decodeURIComponent(userIdMatch[1])
+          const target = panelUsers.getById(userId)
+          if (!target) {
+            return json(res, 404, { ok: false, error: { message: 'user not found', code: 'not_found' } })
+          }
+          if (req.method === 'GET') {
+            const { buckets, slots } = egressIndex()
+            return json(
+              res,
+              200,
+              panel.ok({
+                user: {
+                  ...publicUserView(target),
+                  email: target.email || null,
+                  balance: Number(target.balance) || 0,
+                  concurrency: Number(target.concurrency) || 0,
+                  status: target.status,
+                  notes: target.notes || '',
+                },
+                egress: { buckets: buckets.get(userId) || [], slot: slots.get(userId) || null },
+                migrations: new EgressBindingsRepo().listMigrations({ userId, limit: 100 }),
+              }),
+            )
+          }
+          if (req.method === 'PATCH' || req.method === 'PUT') {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            const patch = {}
+            if (body.password != null) patch.password = body.password
+            if (body.role != null) patch.role = body.role
+            if (body.status != null) patch.enabled = body.status === 'active'
+            else if (body.enabled != null) patch.enabled = body.enabled !== false
+            if (body.vm_create_quota != null) patch.vm_create_quota = body.vm_create_quota
+            if (usersRepo && (body.concurrency != null || body.balance != null || body.notes != null)) {
+              // These live on the users table, not the panel projection.
+              if (body.concurrency != null) usersRepo.update(userId, { concurrency: body.concurrency })
+              if (body.balance != null) usersRepo.update(userId, { balance: body.balance })
+              if (body.notes != null) usersRepo.update(userId, { notes: body.notes })
+            }
+            const rec = Object.keys(patch).length
+              ? panelUsers.update(userId, patch, { actorId: ident.id || null })
+              : usersRepo?.getById(userId) || target
+            return json(res, 200, panel.ok({ user: publicUserView(rec) }))
+          }
+          if (req.method === 'DELETE') {
+            panelUsers.remove(userId, { actorId: ident.id || null })
+            return json(res, 200, panel.ok({ removed: userId }))
+          }
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
       if (req.method === 'GET' && p === '/api/panel/api-keys') {
         const snap = apiKeyStore.snapshot()
