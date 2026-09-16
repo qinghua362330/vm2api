@@ -16,6 +16,15 @@ import {
 import { loadDistillRules, saveDistillRules, validateDistillPatch } from '../core/distill-detect.mjs'
 import { isRefusalGuardEnabled, REFUSAL_GUARD_SETTING } from '../core/refusal-guard.mjs'
 import { RefusalGuardsRepo } from '../db/repos/refusal-guards-repo.mjs'
+import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
+import {
+  checkUserSlotEgress,
+  egressSharingReport,
+  isDirectEgress,
+  migrateUserWithinEgress,
+  rebindUserEgress,
+  releaseSlot,
+} from '../pool/egress-binding.mjs'
 import { SettingsRepo } from '../db/repos/settings-repo.mjs'
 import { parseCodexImportPayload, upsertCodexAccount, readCodexAccounts } from '../vm/codex-slot.mjs'
 import { generateAuthUrl, exchangeAuthCode, normalizeOauthFlavor } from '../oauth/oauth-auth-url.mjs'
@@ -3070,6 +3079,108 @@ export function createPanelHandler(ctx) {
           })
         }
       }
+      // ---- Egress bindings: user ↔ IP ↔ slot ↔ credential ----
+      // A user's egress (IP) is stable; the account behind it may rotate.
+      // Migration is confined to one egress so a user never gains a second IP.
+      if (p === '/api/panel/egress-bindings' || p.startsWith('/api/panel/egress-bindings/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const repo = new EgressBindingsRepo()
+        const vms = listVms(cfg.paths.project)
+        const byId = new Map(vms.map((v) => [v.id, v]))
+
+        if (req.method === 'GET' && p === '/api/panel/egress-bindings') {
+          const slotBindings = repo.listSlotBindings()
+          const slotByUser = new Map(slotBindings.map((b) => [b.user_id, b]))
+          const rows = repo.listEgressBindings().map((b) => {
+            const slot = slotByUser.get(b.user_id) || null
+            const vm = slot ? byId.get(slot.slot_id) || null : null
+            return {
+              user_id: b.user_id,
+              egress_id: b.egress_id,
+              egress_kind: isDirectEgress(b.egress_id) ? 'direct' : 'proxy',
+              egress_reason: b.reason,
+              slot_id: slot?.slot_id || null,
+              slot_present: !!vm,
+              invariant_ok: vm ? checkUserSlotEgress({ userId: b.user_id, vms }, { repo }).ok : false,
+              migrations: slot?.migrations ?? 0,
+              last_reason: slot?.last_reason || null,
+              credential: vm
+                ? {
+                    email: vm.email || vm.claude?.email || null,
+                    has_access: !!vm.claude?.has_access,
+                    has_refresh: !!vm.claude?.has_refresh,
+                    schedulable: vm.schedulable !== false,
+                  }
+                : null,
+            }
+          })
+          const bound = new Set(slotBindings.map((b) => b.slot_id))
+          return json(
+            res,
+            200,
+            panel.ok({
+              bindings: rows,
+              sharing: egressSharingReport({ vms }, { repo }),
+              unbound_slots: vms.filter((v) => !bound.has(v.id)).map((v) => v.id),
+            }),
+          )
+        }
+
+        if (req.method === 'GET' && /^\/api\/panel\/egress-bindings\/[^/]+$/.test(p)) {
+          const userId = decodeURIComponent(p.slice('/api/panel/egress-bindings/'.length))
+          return json(
+            res,
+            200,
+            panel.ok({
+              user_id: userId,
+              egress: repo.getEgressBinding(userId),
+              slot: repo.getSlotBinding(userId),
+              migrations: repo.listMigrations({ userId, limit: 100 }),
+            }),
+          )
+        }
+
+        if (req.method === 'POST' && p === '/api/panel/egress-bindings/rebind') {
+          const body = await readBody(req, 256 * 1024)
+          const r = rebindUserEgress(
+            {
+              userId: body.user_id,
+              egressId: body.egress_id,
+              vms,
+              boundBy: ident.username || body.bound_by || 'admin',
+            },
+            { repo },
+          )
+          return json(res, r.ok ? 200 : 400, panel.ok(r))
+        }
+
+        if (req.method === 'POST' && p === '/api/panel/egress-bindings/migrate') {
+          const body = await readBody(req, 256 * 1024)
+          const r = migrateUserWithinEgress(
+            {
+              userId: body.user_id,
+              vms,
+              reason: body.reason || 'manual',
+              detail: body.detail || null,
+              boundBy: ident.username || 'admin',
+            },
+            { repo },
+          )
+          return json(res, r.ok ? 200 : 409, panel.ok(r))
+        }
+
+        if (req.method === 'POST' && p === '/api/panel/egress-bindings/release') {
+          const body = await readBody(req, 256 * 1024)
+          const r = releaseSlot({ slotId: body.slot_id }, { repo })
+          return json(res, 200, panel.ok(r))
+        }
+
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
+
       // ---- Proxy Pool ----
       if (req.method === 'GET' && p === '/api/panel/proxies') {
         const ident = panelIdentity(req)
