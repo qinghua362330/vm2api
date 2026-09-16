@@ -12,6 +12,9 @@ export type EgressBindingRow = {
   egress_id: string
   egress_kind: 'proxy' | 'direct'
   egress_reason?: string | null
+  /** Every egress this user may use, primary first. 1 = one stable IP. */
+  buckets?: string[]
+  bucket_count?: number
   slot_id?: string | null
   slot_present?: boolean
   invariant_ok?: boolean
@@ -73,6 +76,9 @@ export type EgressBindingsPayload = {
     shared_egresses?: number
   }
   direct_egress?: EgressDirectStatus
+  /** Conversations pinned per egress — a user's sessions spread by bucket. */
+  sessions_by_egress?: Record<string, number>
+  sessions_total?: number
   unbound_slots?: string[]
   pending?: EgressPendingRow[]
   error?: string

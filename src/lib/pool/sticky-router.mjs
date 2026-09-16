@@ -70,10 +70,12 @@ export function firstUserFingerprint(body = {}) {
 }
 
 export class StickyRouter {
-  constructor({ dataDir, db, config }) {
+  constructor({ dataDir, db, config, onSessionMove = null }) {
     this.db = resolveStoreDb({ db, dataDir })
     this.repo = new StickyRepo(this.db)
     this.config = mergeStickyConfig(config)
+    /** Called when a conversation is rebound to a different slot. */
+    this.onSessionMove = typeof onSessionMove === 'function' ? onSessionMove : null
   }
 
   /** Kept for API compat + post-restore hook (state lives in DB). */
@@ -159,7 +161,7 @@ export class StickyRouter {
     return keys
   }
 
-  /** @returns {{ accountId: string, vmId: string } | null } */
+  /** @returns {{ accountId: string, vmId: string, userId: string|null, egressId: string|null } | null } */
   resolve(key) {
     if (!key || !this.config.enabled) return null
     this._purge()
@@ -169,21 +171,52 @@ export class StickyRouter {
       this.repo.remove(key)
       return null
     }
-    return { accountId: ent.account_id, vmId: ent.vm_id, sessionId: ent.session_id || null, key }
+    return {
+      accountId: ent.account_id,
+      vmId: ent.vm_id,
+      sessionId: ent.session_id || null,
+      userId: ent.user_id || null,
+      egressId: ent.egress_id || null,
+      hits: ent.hits || 0,
+      key,
+    }
   }
 
-  bind(key, { accountId, vmId, sessionId = null } = {}, { countHit = true } = {}) {
+  /**
+   * Pin a conversation to a slot.
+   *
+   * `userId` and `egressId` are what let the scheduler check the pin against the
+   * user's buckets, and let the console show which IP a conversation is on. A
+   * change of vmId is reported through `onMove` so a conversation that had to
+   * leave its bucket is auditable rather than silent.
+   */
+  bind(key, { accountId, vmId, sessionId = null, userId = null, egressId = null } = {}, { countHit = true } = {}) {
     if (!key || !this.config.enabled) return
     const ttl = (this.config.ttl_seconds || 86400) * 1000
     const prev = this.repo.get(key) || {}
+    const moved = !!prev.vm_id && !!vmId && prev.vm_id !== vmId
     this.repo.upsert(key, {
       account_id: accountId,
       vm_id: vmId,
       session_id: sessionId || prev.session_id || null,
+      user_id: userId || prev.user_id || null,
+      egress_id: egressId || prev.egress_id || null,
       bound_at: Date.now(),
       expires_at: Date.now() + ttl,
       hits: (prev.hits || 0) + (countHit ? 1 : 0),
     })
+    if (moved && typeof this.onSessionMove === 'function') {
+      try {
+        this.onSessionMove({
+          key,
+          userId: userId || prev.user_id || null,
+          fromVmId: prev.vm_id,
+          toVmId: vmId,
+          fromEgressId: prev.egress_id || null,
+          toEgressId: egressId || null,
+        })
+      } catch {}
+    }
   }
 
   unbind(key) {

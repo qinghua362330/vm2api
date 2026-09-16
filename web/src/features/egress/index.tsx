@@ -159,6 +159,7 @@ export function EgressPage() {
           rows={rows}
           busy={busy}
           pendingByUser={pendingByUser}
+          sessionsByEgress={data.sessions_by_egress || {}}
           onMigrate={(userId) => migrate.mutate(userId)}
           onRebind={(userId) => {
             setRebindUser(userId)

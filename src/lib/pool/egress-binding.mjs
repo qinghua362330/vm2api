@@ -42,6 +42,10 @@ export const MIGRATION_REASONS = Object.freeze([
   'cooldown',
   'admin',
   'manual',
+  // A conversation rebinding to a different slot: same buckets, new credential.
+  'session_rebound',
+  // ...and crossing egresses, which also changes the conversation's IP.
+  'session_egress_change',
 ])
 export const FAILOVER_REASONS = Object.freeze(['egress_failover', 'direct_fallback', 'no_target'])
 
@@ -472,11 +476,33 @@ export function assignUserEgress({ userId, vms = [], hostIdentity = resolveHostI
 }
 
 /**
+ * The egresses a user may use — their buckets, primary first.
+ *
+ * One DB read, so the dispatch path can hand the constraint to the scheduler
+ * without scanning the fleet. An empty array means "no buckets yet", which the
+ * scheduler treats as unconstrained for a platform-scoped caller.
+ */
+export function userBucketEgressIds(userId, { repo = new EgressBindingsRepo(getDb()) } = {}) {
+  return repo.listBuckets(userId).map((bucket) => bucket.egress_id)
+}
+
+/** Slots reachable through a user's buckets. Used by the console, not the hot path. */
+export function userBucketSlots({ userId, vms = [], hostIdentity = resolveHostIdentity() } = {}, { repo = new EgressBindingsRepo(getDb()) } = {}) {
+  const allowed = new Set(userBucketEgressIds(userId, { repo }))
+  if (!allowed.size) return []
+  return vms
+    .filter((vm) => allowed.has(slotEgressId(vm, { hostIdentity })))
+    .map((vm) => slotLabel(vm))
+    .filter(Boolean)
+}
+
+/**
  * Dispatch entry point: the slot a user's request should prefer.
  *
- * Priority is user binding > session stickiness > failover, so the caller feeds
- * this into the pool scheduler as a *soft* preference: the scheduler tries the
- * bound slot first, and only falls through when it genuinely cannot serve.
+ * Priority is session binding > bucket preference > failover. The session pin is
+ * enforced by the scheduler (it owns the sticky map); this function supplies the
+ * preferred slot for a *new* conversation plus the bucket set that pin is
+ * validated against.
  *
  * A user with no binding is assigned one here, which is what makes the binding
  * real rather than something an operator has to seed by hand.
@@ -497,6 +523,8 @@ export function resolveUserDispatch(
   const uid = String(userId || '').trim()
   if (!uid) return { ok: false, reason: 'user_required' }
 
+  const buckets = userBucketEgressIds(uid, { repo })
+
   // Steady state: the binding is set and only the bound slot matters. The
   // scheduler needs the binding layer on the request path, so avoid reading the
   // whole fleet (listVms returns summaries anyway; the gate needs full records).
@@ -507,7 +535,15 @@ export function resolveUserDispatch(
     const sameEgress = !!vm && slotEgressId(vm, { hostIdentity }) === binding.egress_id
     const verdict = vm ? slotVerdict(vm, gates, { allowDirect: isDirectEgress(binding.egress_id) }) : null
     if (sameEgress && verdict?.ok) {
-      return { ok: true, slotId: bound.slot_id, vm, egressId: binding.egress_id, migrated: false, fast: true }
+      return {
+        ok: true,
+        slotId: bound.slot_id,
+        vm,
+        egressId: binding.egress_id,
+        allowedEgressIds: buckets,
+        migrated: false,
+        fast: true,
+      }
     }
     if (verdict && !verdict.ok && String(verdict.reason).startsWith('transient:')) {
       return {
@@ -517,6 +553,7 @@ export function resolveUserDispatch(
         retry: true,
         slotId: bound.slot_id,
         egressId: binding.egress_id,
+        allowedEgressIds: buckets,
       }
     }
   }
@@ -532,12 +569,13 @@ export function resolveUserDispatch(
     { userId: uid, vms: all, hostIdentity, gates, reason, allowFailover, allowDirect },
     { repo },
   )
+  const allowed = repo.listBuckets(uid).map((bucket) => bucket.egress_id)
   if (resolved.ok) {
-    return { ...resolved, egressId: resolved.egressId || assigned.egressId, assigned: !!assigned.created }
+    return { ...resolved, egressId: resolved.egressId || assigned.egressId, allowedEgressIds: allowed, assigned: !!assigned.created }
   }
   // Even when nothing can serve right now, the binding is what keeps the user's
   // IP stable once something frees up.
-  return { ...resolved, egressId: assigned.egressId, assigned: !!assigned.created }
+  return { ...resolved, egressId: assigned.egressId, allowedEgressIds: allowed, assigned: !!assigned.created }
 }
 
 // ── automatic triggers ──────────────────────────────────────────────────────

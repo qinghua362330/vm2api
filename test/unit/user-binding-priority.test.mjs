@@ -13,10 +13,78 @@ import {
 } from '../../src/lib/pool/egress-binding.mjs'
 
 /**
- * Priority contract: user egress binding > session stickiness > failover.
- * The bound slot is a soft preference — tried first, and only abandoned when it
- * genuinely cannot serve, because swapping it would move the user's IP.
+ * Priority contract: a conversation keeps its credential, the user's bucket set
+ * bounds what it may use, and the generic pool pick is last.
+ *
+ *   1. session binding   — one conversation, one credential
+ *   2. bucket preference — where a NEW conversation starts
+ *   3. pool pick / failover
+ *
+ * A session pin that falls outside the user's buckets is stale and is dropped,
+ * so a conversation can never escape the buckets it was granted.
  */
+
+test('a conversation keeps its slot even when the user prefers another bucket', async (t) => {
+  const root = project()
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const pool = scheduler(root, { stickyRouter: stickyRouterFor({ vmId: 'vm-02', accountId: 'account-2' }) })
+  const selected = await pool.selectAndReserve({
+    model: 'claude-test',
+    stickyKey: 'conv-1',
+    preferVmId: 'vm-01',
+    allowedEgressIds: ['px-a', 'px-b'],
+    allowWait: false,
+  })
+  assert.equal(selected.ok, true)
+  assert.equal(selected.vmId, 'vm-02', 'the running conversation must not switch credential')
+  assert.equal(selected.selectionReason, 'sticky')
+  selected.release()
+})
+
+test('a session pin outside the user buckets is dropped, not honoured', async (t) => {
+  const root = project()
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  let unbound = 0
+  const pool = scheduler(root, {
+    stickyRouter: {
+      resolve: () => ({ vmId: 'vm-03', accountId: 'account-3' }),
+      bind: () => {},
+      unbind: () => {
+        unbound++
+      },
+    },
+  })
+  const selected = await pool.selectAndReserve({
+    model: 'claude-test',
+    stickyKey: 'conv-1',
+    preferVmId: 'vm-01',
+    // the admin moved this user into a different bucket; vm-03 (px-b) is no
+    // longer theirs, so the pin to it must not be honoured
+    allowedEgressIds: ['px-a'],
+    allowWait: false,
+  })
+  assert.equal(selected.ok, true)
+  assert.equal(selected.vmId, 'vm-01', 'falls back inside the granted buckets')
+  assert.equal(unbound, 1, 'the stale pin is cleared')
+  selected.release()
+})
+
+test('without a session pin a new conversation starts in the preferred bucket', async (t) => {
+  const root = project()
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const pool = scheduler(root)
+  const selected = await pool.selectAndReserve({
+    model: 'claude-test',
+    stickyKey: 'conv-new',
+    preferVmId: 'vm-01',
+    allowedEgressIds: ['px-a', 'px-b'],
+    allowWait: false,
+  })
+  assert.equal(selected.ok, true)
+  assert.equal(selected.vmId, 'vm-01')
+  assert.equal(selected.selectionReason, 'user-binding')
+  selected.release()
+})
 
 function project() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-user-binding-'))
@@ -98,22 +166,6 @@ function tmpRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-user-binding-db-'))
   return { dir, repo: new EgressBindingsRepo(createDatabase({ dataDir: dir })) }
 }
-
-test('the bound slot wins over a sticky session', async (t) => {
-  const root = project()
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
-  const pool = scheduler(root, { stickyRouter: stickyRouterFor({ vmId: 'vm-02', accountId: 'account-2' }) })
-  const selected = await pool.selectAndReserve({
-    model: 'claude-test',
-    stickyKey: 'conv-1',
-    preferVmId: 'vm-01',
-    allowWait: false,
-  })
-  assert.equal(selected.ok, true)
-  assert.equal(selected.vmId, 'vm-01', 'user binding outranks stickiness')
-  assert.equal(selected.selectionReason, 'user-binding')
-  selected.release()
-})
 
 test('without a preference the sticky session still wins', async (t) => {
   const root = project()

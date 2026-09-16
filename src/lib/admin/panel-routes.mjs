@@ -3117,15 +3117,27 @@ export function createPanelHandler(ctx) {
         if (req.method === 'GET' && p === '/api/panel/egress-bindings') {
           const slotBindings = repo.listSlotBindings()
           const slotByUser = new Map(slotBindings.map((b) => [b.user_id, b]))
+          const bucketsByUser = new Map()
+          for (const bucket of repo.listAllBuckets()) {
+            if (!bucketsByUser.has(bucket.user_id)) bucketsByUser.set(bucket.user_id, [])
+            bucketsByUser.get(bucket.user_id).push(bucket.egress_id)
+          }
+          // Conversations pinned per egress: how many live sessions a user has
+          // spread across their buckets.
+          const sessionsByEgress = stickyRouter?.repo?.countByEgress?.() || {}
           const rows = repo.listEgressBindings().map((b) => {
             const slot = slotByUser.get(b.user_id) || null
             const vm = slot ? byId.get(slot.slot_id) || null : null
             const verdict = vm ? slotVerdict(vm, gates, { allowDirect: isDirectEgress(b.egress_id) }) : null
+            const buckets = bucketsByUser.get(b.user_id) || [b.egress_id]
             return {
               user_id: b.user_id,
               egress_id: b.egress_id,
               egress_kind: isDirectEgress(b.egress_id) ? 'direct' : 'proxy',
               egress_reason: b.reason,
+              // 1 bucket = one stable IP; >1 = conversations spread by session
+              buckets,
+              bucket_count: buckets.length,
               slot_id: slot?.slot_id || null,
               slot_present: !!vm,
               invariant_ok: vm ? checkUserSlotEgress({ userId: b.user_id, vms }, { repo }).ok : false,
@@ -3153,6 +3165,8 @@ export function createPanelHandler(ctx) {
               // The shared host IP is the platform's last resort: every slot with
               // no proxy bound egresses from here, and it is shared on purpose.
               direct_egress: hostEgressStatus({ vms }),
+              sessions_by_egress: sessionsByEgress,
+              sessions_total: Object.values(sessionsByEgress).reduce((sum, n) => sum + Number(n || 0), 0),
               unbound_slots: vms.filter((v) => !bound.has(v.id)).map((v) => v.id),
               // a dry sweep shows what the next tick would move, before it moves
               pending: autoMigrateExhausted({ vms, gates, dryRun: true }, { repo }).results,

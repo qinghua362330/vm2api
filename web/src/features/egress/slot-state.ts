@@ -81,6 +81,8 @@ export function migrationReasonLabel(reason?: string | null): string {
     no_target: '无处可去（等待）',
     admin: '管理员改绑',
     manual: '手动迁移',
+    session_rebound: '会话换槽（凭证变更）',
+    session_egress_change: '会话换 IP（凭证+出口变更）',
   }
   return map[raw] || raw || '—'
 }
@@ -88,7 +90,12 @@ export function migrationReasonLabel(reason?: string | null): string {
 /** True when the reason changed the user's egress, which is the notable case. */
 export function reasonCrossesEgress(reason?: string | null): boolean {
   const raw = String(reason || '').trim()
-  return raw === 'egress_failover' || raw === 'direct_fallback' || raw === 'admin'
+  return (
+    raw === 'egress_failover' ||
+    raw === 'direct_fallback' ||
+    raw === 'admin' ||
+    raw === 'session_egress_change'
+  )
 }
 
 export function egressLabel(row: { egress_id?: string; egress_kind?: string }): string {

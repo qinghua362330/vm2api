@@ -216,6 +216,7 @@ export class FailoverRunner {
     pinVmId = null,
     ownerScope = null,
     preferVmId = null,
+    allowedEgressIds = null,
     countUsage = true,
   } = {}) {
     if (!this.scheduler) throw new Error('FailoverRunner requires a scheduler')
@@ -263,10 +264,11 @@ export class FailoverRunner {
           allowWait: true,
           pinVmId,
           ownerScope,
-          // The user's own egress binding outranks session stickiness and the
-          // generic pool pick. Attempts after the first deliberately drop it so a
-          // failing slot still fails over instead of being retried forever.
+          // A conversation's own pin is honoured on every attempt; the
+          // user-level bucket preference only guides the first one, so a failing
+          // slot still fails over instead of being retried forever.
           preferVmId: attemptNo === 1 ? preferVmId : null,
+          allowedEgressIds,
         })
       } catch (error) {
         if (error?.code === 'selection_cancelled') {

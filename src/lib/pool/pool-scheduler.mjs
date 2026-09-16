@@ -26,6 +26,8 @@ import { splitBlocksModel } from './weekly-split.mjs'
 import { slotAllowsModel } from './slot-model-gate.mjs'
 import { resolveCredentialScheduleLevel } from './credential-weight.mjs'
 import { PLATFORM_SCOPE, vmMatchesOwnerScope } from '../admin/resource-owner.mjs'
+import { slotEgressId } from './egress-binding.mjs'
+import { resolveHostIdentity } from '../vm/host-identity.mjs'
 
 const WAIT_TIMEOUT_MIN_MS = 1000
 const WAIT_TIMEOUT_MAX_MS = 120000
@@ -173,6 +175,7 @@ export class PoolScheduler {
     pinVmId = null,
     ownerScope = PLATFORM_SCOPE,
     preferVmId = null,
+    allowedEgressIds = null,
   } = {}) {
     const startedAt = Date.now()
     const pinned = !!String(pinVmId || '').trim()
@@ -206,7 +209,13 @@ export class PoolScheduler {
         ownerScope,
       })
       const available = candidates.filter((candidate) => !candidate.busy)
-      const selected = this.pick(available, { model, stickyKey, eligible: candidates, preferVmId: preferred })
+      const selected = this.pick(available, {
+        model,
+        stickyKey,
+        eligible: candidates,
+        preferVmId: preferred,
+        allowedEgressIds,
+      })
       if (this.lastStickyCleared) stickyCleared = true
       if (selected) {
         const reservation = this.reserve(selected, { sessionKey: stickyKey, skipQuota: pinned })
@@ -298,6 +307,7 @@ export class PoolScheduler {
         availableAt: eligibility.availableAt || null,
         waitReason: eligibility.waitReason || null,
         cooldownReason: state?.cooldown_reason || null,
+        egressId: slotEgressId(vm, { hostIdentity: resolveHostIdentity() }),
         exec: this.executionContext(vm, accountId),
       })
     }
@@ -582,40 +592,60 @@ export class PoolScheduler {
     return cleared
   }
 
-  pick(candidates, { model, stickyKey, eligible = candidates, preferVmId = null } = {}) {
+  pick(candidates, { model, stickyKey, eligible = candidates, preferVmId = null, allowedEgressIds = null } = {}) {
     this.lastStickyCleared = false
     if (!candidates.length && !eligible?.length) return null
     const poolAll = eligible || candidates
 
-    // The user's own egress binding outranks session stickiness: their IP is the
-    // stable identity, a session key is not. A busy bound slot is waited for
-    // rather than swapped, because swapping would put this request on a
-    // different egress. Nothing is unbound here — only the scheduler's sticky
-    // map is allowed to clear, so a miss simply falls through.
+    // The egresses this user is allowed to use (their buckets). Null means
+    // "unconstrained" — a platform-scoped caller or a user with no buckets yet.
+    // Constraining by egress rather than by slot list keeps this off the fleet
+    // scan: the scheduler already holds every candidate's vm.
+    const allowed =
+      Array.isArray(allowedEgressIds) && allowedEgressIds.length ? new Set(allowedEgressIds.map(String)) : null
+    const permitted = (candidate) => !allowed || allowed.has(String(candidate?.egressId || ''))
+
+    // 1. The conversation's own binding wins.
+    //
+    // One conversation must keep one credential: switching accounts mid-thread
+    // loses the prompt cache and puts the same conversation_id under two
+    // accounts, which is a cross-account link. A pin that now falls outside the
+    // user's buckets is stale (an admin rebound them) and is dropped rather than
+    // honoured, so a session can never escape the buckets it was granted.
+    const bound = stickyKey ? this.stickyRouter?.resolve?.(stickyKey) : null
+    if (bound) {
+      const boundCandidate = poolAll.find((candidate) => candidate.vmId === bound.vmId)
+      if (boundCandidate && !permitted(boundCandidate)) {
+        this.stickyRouter?.unbind?.(stickyKey)
+        this.lastStickyCleared = true
+      } else {
+        const match = (candidate) => candidate.vmId === bound.vmId && candidate.accountId === bound.accountId
+        const amongEligible = poolAll.find(match)
+        if (!amongEligible) {
+          this.stickyRouter?.unbind?.(stickyKey)
+          this.lastStickyCleared = true
+        } else if (amongEligible.busy) {
+          // Wait for the conversation's own slot instead of moving it: a busy
+          // slot is a delay, a rebind is a different credential.
+          if (stickyShouldWait(amongEligible.waitReason)) return null
+          this.stickyRouter?.unbind?.(stickyKey)
+          this.lastStickyCleared = true
+        } else {
+          return { ...amongEligible, selectionReason: 'sticky' }
+        }
+      }
+    }
+
+    // 2. No conversation binding yet — start it in the user's preferred bucket.
     const prefer = preferVmId ? String(preferVmId).trim() : ''
     if (prefer) {
       const own = poolAll.find((candidate) => candidate.vmId === prefer)
-      if (own) {
+      if (own && permitted(own)) {
         if (!own.busy) return { ...own, selectionReason: 'user-binding' }
         if (stickyShouldWait(own.waitReason)) return null
       }
     }
 
-    const bound = stickyKey ? this.stickyRouter?.resolve?.(stickyKey) : null
-    if (bound) {
-      const match = (candidate) => candidate.vmId === bound.vmId && candidate.accountId === bound.accountId
-      const amongEligible = poolAll.find(match)
-      if (!amongEligible) {
-        this.stickyRouter?.unbind?.(stickyKey)
-        this.lastStickyCleared = true
-      } else if (amongEligible.busy) {
-        if (stickyShouldWait(amongEligible.waitReason)) return null
-        this.stickyRouter?.unbind?.(stickyKey)
-        this.lastStickyCleared = true
-      } else {
-        return { ...amongEligible, selectionReason: 'sticky' }
-      }
-    }
     if (!candidates.length) return null
     const highestPriority = Math.max(...candidates.map((candidate) => candidate.priority))
     let pool = candidates.filter((candidate) => candidate.priority === highestPriority)

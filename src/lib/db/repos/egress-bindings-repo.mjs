@@ -71,6 +71,31 @@ export class EgressBindingsRepo {
       'SELECT egress_id, COUNT(*) AS users FROM user_egress_bindings GROUP BY egress_id',
     )
 
+    // ── buckets (022): the full set of egresses a user may use ──────────────
+    this._listBuckets = db.prepare(
+      'SELECT * FROM user_egress_buckets WHERE user_id = ? ORDER BY is_primary DESC, egress_id',
+    )
+    this._listAllBuckets = db.prepare(
+      'SELECT * FROM user_egress_buckets ORDER BY user_id, is_primary DESC, egress_id',
+    )
+    this._countBucketsByEgress = db.prepare(
+      'SELECT egress_id, COUNT(*) AS users FROM user_egress_buckets GROUP BY egress_id',
+    )
+    this._insertBucket = db.prepare(`
+      INSERT OR IGNORE INTO user_egress_buckets
+        (user_id, egress_id, is_primary, reason, bound_by, bound_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    this._clearPrimary = db.prepare('UPDATE user_egress_buckets SET is_primary = 0 WHERE user_id = ?')
+    this._setPrimary = db.prepare(
+      'UPDATE user_egress_buckets SET is_primary = 1, updated_at = ? WHERE user_id = ? AND egress_id = ?',
+    )
+    this._deleteBucket = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ? AND egress_id = ?')
+    this._deleteAllBuckets = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ?')
+    this._countByUser = db.prepare(
+      'SELECT user_id, COUNT(*) AS buckets FROM user_egress_buckets GROUP BY user_id',
+    )
+
     this._getSlotBinding = db.prepare('SELECT * FROM user_slot_bindings WHERE user_id = ?')
     this._listSlotBindings = db.prepare('SELECT * FROM user_slot_bindings ORDER BY user_id')
     this._listSlotBindingsByEgress = db.prepare(
@@ -145,6 +170,10 @@ export class EgressBindingsRepo {
   /**
    * Create the binding when missing. When it exists with another egress this
    * is an admin rebind — callers must pass reason='admin' and it is audited.
+   *
+   * Writes both tables: `user_egress_bindings` stays the primary-only view the
+   * migration and dashboard paths read, `user_egress_buckets` carries the full
+   * set. They are always written together so they cannot disagree.
    */
   upsertEgressBinding({ userId, egressId, reason = 'auto', boundBy = null } = {}) {
     const uid = String(userId || '').trim()
@@ -152,13 +181,113 @@ export class EgressBindingsRepo {
     if (!uid || !eid) throw new Error('userId and egressId are required')
     const existing = this.getEgressBinding(uid)
     const stamp = nowIso()
+    let created = false
     if (!existing) {
       this._insertEgressBinding.run(uid, eid, reason, boundBy, stamp, stamp)
-      return { created: true, changed: true, binding: this.getEgressBinding(uid) }
+      created = true
+    } else if (existing.egress_id !== eid) {
+      this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid)
     }
-    if (existing.egress_id === eid) return { created: false, changed: false, binding: existing }
-    this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid)
-    return { created: false, changed: true, binding: this.getEgressBinding(uid) }
+    this.setPrimaryBucket({ userId: uid, egressId: eid, reason, boundBy })
+    const binding = this.getEgressBinding(uid)
+    return { created, changed: created || existing?.egress_id !== eid, binding }
+  }
+
+  // ── buckets ───────────────────────────────────────────────────────────────
+
+  /** Every egress this user may use, primary first. */
+  listBuckets(userId) {
+    if (!userId) return []
+    return this._listBuckets.all(String(userId)).map((row) => ({
+      ...row,
+      is_primary: Number(row.is_primary) === 1,
+    }))
+  }
+
+  listAllBuckets() {
+    return this._listAllBuckets.all().map((row) => ({ ...row, is_primary: Number(row.is_primary) === 1 }))
+  }
+
+  /** How many buckets each user holds — 1 means a single stable IP. */
+  countBucketsByUser() {
+    const out = {}
+    for (const row of this._countByUser.all()) out[row.user_id] = Number(row.buckets) || 0
+    return out
+  }
+
+  countUsersByBucketEgress() {
+    const out = {}
+    for (const row of this._countBucketsByEgress.all()) out[row.egress_id] = Number(row.users) || 0
+    return out
+  }
+
+  addBucket({ userId, egressId, isPrimary = false, reason = 'admin', boundBy = null } = {}) {
+    const uid = String(userId || '').trim()
+    const eid = String(egressId || '').trim()
+    if (!uid || !eid) throw new Error('userId and egressId are required')
+    const stamp = nowIso()
+    return withTransaction(this.db, () => {
+      const res = this._insertBucket.run(uid, eid, isPrimary ? 1 : 0, reason, boundBy, stamp, stamp)
+      if (isPrimary) {
+        this._clearPrimary.run(uid)
+        this._setPrimary.run(stamp, uid, eid)
+      }
+      return { added: res.changes > 0, buckets: this.listBuckets(uid) }
+    })
+  }
+
+  /** Promote a bucket to primary; the previous primary is demoted, not removed. */
+  setPrimaryBucket({ userId, egressId, reason = 'auto', boundBy = null } = {}) {
+    const uid = String(userId || '').trim()
+    const eid = String(egressId || '').trim()
+    if (!uid || !eid) throw new Error('userId and egressId are required')
+    const stamp = nowIso()
+    return withTransaction(this.db, () => {
+      this._insertBucket.run(uid, eid, 0, reason, boundBy, stamp, stamp)
+      this._clearPrimary.run(uid)
+      this._setPrimary.run(stamp, uid, eid)
+      this._syncPrimaryMirror(uid, eid, reason, boundBy, stamp)
+      return this.listBuckets(uid)
+    })
+  }
+
+  /**
+   * `user_egress_bindings` is the primary-only view other paths read; it must
+   * never disagree with the bucket that is marked primary.
+   */
+  _syncPrimaryMirror(uid, eid, reason, boundBy, stamp) {
+    const existing = this.getEgressBinding(uid)
+    if (!existing) {
+      this._insertEgressBinding.run(uid, eid, reason, boundBy, stamp, stamp)
+      return
+    }
+    if (existing.egress_id !== eid) {
+      this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid)
+    }
+  }
+
+  removeBucket({ userId, egressId } = {}) {
+    const uid = String(userId || '').trim()
+    const eid = String(egressId || '').trim()
+    if (!uid || !eid) throw new Error('userId and egressId are required')
+    return withTransaction(this.db, () => {
+      const before = this.listBuckets(uid)
+      const wasPrimary = before.some((b) => b.egress_id === eid && b.is_primary)
+      this._deleteBucket.run(uid, eid)
+      const after = this.listBuckets(uid)
+      if (wasPrimary) {
+        // Never leave a user with buckets but no primary: promote the first and
+        // keep the primary-only mirror in step with it.
+        const next = after[0]
+        if (next) {
+          this._setPrimary.run(nowIso(), uid, next.egress_id)
+          this._syncPrimaryMirror(uid, next.egress_id, 'auto', null, nowIso())
+        } else {
+          this._deleteEgressBinding.run(uid)
+        }
+      }
+      return { removed: before.length !== after.length, buckets: this.listBuckets(uid) }
+    })
   }
 
   deleteEgressBinding(userId) {

@@ -23,6 +23,8 @@ type Props = {
   busy: boolean
   /** Users whose next sweep will move them, keyed by user id. */
   pendingByUser: Map<string, string>
+  /** Live conversations pinned per egress. */
+  sessionsByEgress: Record<string, number>
   onMigrate: (userId: string) => void
   onRebind: (userId: string) => void
   onRelease: (slotId: string) => void
@@ -40,6 +42,7 @@ export function EgressTable({
   rows,
   busy,
   pendingByUser,
+  sessionsByEgress,
   onMigrate,
   onRebind,
   onRelease,
@@ -60,6 +63,7 @@ export function EgressTable({
         <TableRow>
           <TableHead>用户</TableHead>
           <TableHead>出口 IP</TableHead>
+          <TableHead>桶 / 会话</TableHead>
           <TableHead>槽</TableHead>
           <TableHead>凭证</TableHead>
           <TableHead>状态</TableHead>
@@ -84,6 +88,19 @@ export function EgressTable({
                     共享
                   </Badge>
                 ) : null}
+              </TableCell>
+              <TableCell className='text-xs'>
+                <span title={(row.buckets || []).join('、')}>
+                  {row.bucket_count ?? 1} 个桶
+                </span>
+                {(row.bucket_count ?? 1) > 1 ? (
+                  <Badge variant='outline' className='ml-2' title='对话按 session 固定在各桶内'>
+                    按会话分流
+                  </Badge>
+                ) : null}
+                <span className='text-muted-foreground ml-2'>
+                  会话 {sessionsByEgress[row.egress_id] ?? 0}
+                </span>
               </TableCell>
               <TableCell className='font-mono text-xs'>
                 {row.slot_id || <span className='text-destructive'>无</span>}

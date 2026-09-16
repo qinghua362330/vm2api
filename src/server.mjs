@@ -30,6 +30,7 @@ import { createKernelWatchdog, normalizeKernelWatchdogConfig } from './lib/trans
 
 import { createUsageProbeMonitor, normalizeUsageProbeConfig } from './lib/oauth/usage-probe-monitor.mjs'
 import { createEgressMigrationMonitor } from './lib/pool/egress-migration-monitor.mjs'
+import { EgressBindingsRepo } from './lib/db/repos/egress-bindings-repo.mjs'
 import { normalizeOfficialCcConfig } from './lib/oauth/official-cc-bootstrap.mjs'
 import { invalidateLiveCredentialCache } from './lib/admin/panel-live-credentials.mjs'
 import { normalizeHealthProbeConfig, createHealthProbeMonitor, HEALTH_REAL_HEADER } from './lib/admin/health-probe.mjs'
@@ -250,7 +251,25 @@ routingConfig.usage_probe = normalizeUsageProbeConfig(routingConfig.usage_probe)
 routingConfig.notify = normalizeNotifyConfig(routingConfig.notify)
 routingConfig.tiers = normalizeTiers(routingConfig.tiers, routingConfig.quota, routingConfig.concurrency)
 syncTierDefaultsIntoRouting()
-stickyRouter = new StickyRouter({ dataDir, config: routingConfig })
+stickyRouter = new StickyRouter({
+  dataDir,
+  config: routingConfig,
+  // A conversation that has to leave its slot is worth recording: it changed
+  // credential mid-thread, and if it crossed egresses it changed IP too.
+  onSessionMove: ({ key, userId, fromVmId, toVmId, fromEgressId, toEgressId }) => {
+    if (!userId) return
+    try {
+      new EgressBindingsRepo().recordMigration({
+        userId: String(userId),
+        egressId: toEgressId || fromEgressId || 'unknown',
+        fromSlot: fromVmId,
+        toSlot: toVmId,
+        reason: fromEgressId && toEgressId && fromEgressId !== toEgressId ? 'session_egress_change' : 'session_rebound',
+        detail: `session ${key}`,
+      })
+    } catch {}
+  },
+})
 accountQuota = new AccountQuota({
   dataDir,
   config: routingConfig,

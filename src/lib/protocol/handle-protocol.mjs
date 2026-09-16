@@ -130,10 +130,11 @@ export function createHandleProtocol(deps) {
    * degrade to the ordinary pool pick — never fail the request — so this is
    * total: any error returns null and the scheduler decides.
    */
-  function userBoundSlot(req, ownerScope) {
+  function userBinding(req, ownerScope) {
+    const none = { preferVmId: null, allowedEgressIds: null }
     try {
       const userId = ownerScope?.type === 'user' ? String(ownerScope.userId || '').trim() : ''
-      if (!userId) return null
+      if (!userId) return none
       const projectRoot = cfg.paths.project
       const gates = buildEgressGates({ quota: accountQuota, runtimeRepo: accountQuota?.runtimeRepo })
       const fullFleet = () =>
@@ -148,9 +149,14 @@ export function createHandleProtocol(deps) {
         loadVm: (id) => getVm(projectRoot, id),
         vms: fullFleet,
       })
-      return resolved?.ok ? String(resolved.slotId || '') || null : null
+      return {
+        preferVmId: resolved?.slotId ? String(resolved.slotId) : null,
+        // The bucket set a session pin must stay inside. Null = unconstrained.
+        allowedEgressIds: resolved?.allowedEgressIds?.length ? resolved.allowedEgressIds : null,
+      }
     } catch {
-      return null
+      // A binding problem must degrade to the ordinary pool pick, never fail.
+      return none
     }
   }
   function mapProtocolClientError(result, logBag, fallbackCode) {
@@ -736,10 +742,11 @@ export function createHandleProtocol(deps) {
     // Pin is panel test-chat / diagnostics (manage). Unpinned /v1 is dispatch.
     const ownerScope = pinVmId ? { type: 'any' } : ownerScopeFromRequest(req, apiKeyStore?.users)
     const healthReal = isHealthRealBypass(req.headers)
-    // Priority is user binding > session stickiness > failover. The bound slot is
-    // a soft preference: the scheduler tries it first and falls through only when
-    // it genuinely cannot serve, which is what keeps a user's egress IP stable.
-    const preferVmId = pinVmId ? null : userBoundSlot(req, ownerScope)
+    // Priority is session binding > bucket preference > failover. A running
+    // conversation keeps its credential (sticky, enforced in the scheduler); a
+    // new one starts in the user's primary bucket; the pin is only honoured
+    // inside the buckets the user was granted.
+    const userPin = pinVmId ? { preferVmId: null, allowedEgressIds: null } : userBinding(req, ownerScope)
     let result
     try {
       result = await getFailoverRunner().run({
@@ -750,7 +757,8 @@ export function createHandleProtocol(deps) {
         stickyKeys,
         pinVmId,
         ownerScope,
-        preferVmId,
+        preferVmId: userPin.preferVmId,
+        allowedEgressIds: userPin.allowedEgressIds,
         countUsage: !healthReal,
         stream: upstreamStream,
         deliveryMode,

@@ -36,6 +36,11 @@ export function EgressSummary({ data }: Props) {
       desc: `${data.sharing?.shared_egresses ?? 0} 个 IP 承载多个槽`,
     },
     {
+      title: '在用会话',
+      value: data.sessions_total ?? 0,
+      desc: '每个对话固定在一个桶内',
+    },
+    {
       title: '待迁移',
       value: pending.length,
       desc: pending.length ? '下一次扫描会搬走' : '全部可用',
@@ -51,7 +56,7 @@ export function EgressSummary({ data }: Props) {
 
   return (
     <div className='mb-4 space-y-3'>
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-5'>
         {cards.map((card) => (
           <Card key={card.title}>
             <CardHeader className='pb-2'>

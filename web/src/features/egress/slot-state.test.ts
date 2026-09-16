@@ -79,6 +79,15 @@ describe('labels', () => {
     expect(reasonCrossesEgress('quota_exhausted')).toBe(false)
   })
 
+  it('distinguishes a session rebind from a session IP change', () => {
+    // same buckets, different credential — the conversation moved slot
+    expect(migrationReasonLabel('session_rebound')).toContain('凭证变更')
+    expect(reasonCrossesEgress('session_rebound')).toBe(false)
+    // crossed egresses — the conversation changed IP too
+    expect(migrationReasonLabel('session_egress_change')).toContain('换 IP')
+    expect(reasonCrossesEgress('session_egress_change')).toBe(true)
+  })
+
   it('names the shared host egress', () => {
     expect(egressLabel({ egress_id: 'direct:203.0.113.9', egress_kind: 'direct' })).toBe(
       '本机共享 203.0.113.9'
