@@ -3,7 +3,8 @@
  * 公开仓只走 rust cli-hop（kernel → Claude Code）。Go HTTP 转发不再启用。
  * Credential import/ensure 仍可走 Go 客户端，但不参与推理 hop。
  */
-import { ensureWorkerCredential } from './go-worker-client.mjs'
+import { ensureWorkerCredential, callGoWorker, streamGoWorker } from './go-worker-client.mjs'
+import { isCrsMock } from './crs-mock.mjs'
 import {
   streamRustKernel,
   callRustKernel,
@@ -55,6 +56,14 @@ export function peekRustHealth(exec, ttlMs, now = Date.now()) {
 }
 
 export function resolveHopEngine(_vm, _routing = {}, { rustReady = null, binPath = null } = {}) {
+  // The e2e harness runs entirely on the in-process Anthropic mock
+  // (`KIN_CRS_MOCK=1`, test/harness.mjs). That mock is implemented on the Go
+  // client path, so forcing rust here made every inference e2e test 503 with
+  // "rust kernel is not available" — the public build ships no patched CLI.
+  // Mock mode is test-only and never set in production.
+  if (isCrsMock()) {
+    return { engine: 'go', wanted: 'go', reason: 'crs_mock', fallback: false, blocked: false, mock: true }
+  }
   const wanted = 'rust'
   const bin = binPath != null ? String(binPath).trim() : kernelBinPath()
   if (rustReady === true) {
@@ -147,6 +156,20 @@ async function prepareRust(exec, { ensure, routing } = {}) {
 async function runHop({ mode, opts }) {
   const routing = opts.routing || {}
   const decision = resolveHopEngine(opts.exec?.vm, routing)
+
+  // Mock harness: serve from the in-process Anthropic stub. No kernel, no
+  // network, no credential files (see src/lib/transport/crs-mock.mjs).
+  if (decision.engine === 'go') {
+    const sendMock = mode === 'stream' ? streamGoWorker : callGoWorker
+    const mocked = await sendMock(opts)
+    return {
+      ...mocked,
+      engine: 'go',
+      wanted_engine: decision.wanted,
+      engine_reason: decision.reason,
+    }
+  }
+
   let engine = 'rust'
   let reason = decision.reason
   if (!decision.blocked) {

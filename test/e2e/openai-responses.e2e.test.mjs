@@ -4,7 +4,22 @@ import { startGateway, api, readTrace } from '../harness.mjs'
 
 const MODEL = 'claude-haiku-4-5-20251001'
 
-test('POST /v1/responses non-stream shape: object + output_text + usage', async () => {
+/**
+ * /v1/responses for Claude models is refused on purpose.
+ *
+ * handle-protocol.mjs guards it explicitly:
+ *   if (protocol === 'openai.responses') → 400 protocol_not_allowed
+ *     "Claude models are not accepted on /v1/responses"
+ *
+ * The endpoint belonged to the GPT/Codex surface, which the public snapshot
+ * removed ("disable Go hop and keep rust Claude Code only"). The assertions are
+ * kept, skipped, so re-enabling the surface is a one-line change here plus
+ * deleting that guard.
+ */
+const responsesEnabled = false
+const responsesTest = responsesEnabled ? test : test.skip
+
+responsesTest('POST /v1/responses non-stream shape: object + output_text + usage', async () => {
   const gw = await startGateway({ mockText: 'hello-resp' })
   try {
     const r = await api(gw, 'POST', '/v1/responses', {
@@ -29,7 +44,7 @@ test('POST /v1/responses non-stream shape: object + output_text + usage', async 
   }
 })
 
-test('POST /v1/responses stream includes [DONE]', async () => {
+responsesTest('POST /v1/responses stream includes [DONE]', async () => {
   const gw = await startGateway({ mockText: 'rchunk' })
   try {
     const res = await fetch(gw.baseUrl + '/v1/responses', {
@@ -49,7 +64,7 @@ test('POST /v1/responses stream includes [DONE]', async () => {
   }
 })
 
-test('POST /v1/responses tools → function_call in output', async () => {
+responsesTest('POST /v1/responses tools → function_call in output', async () => {
   const gw = await startGateway({ scenario: 'tool_use' })
   try {
     const r = await api(gw, 'POST', '/v1/responses', {

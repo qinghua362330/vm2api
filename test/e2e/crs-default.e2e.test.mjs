@@ -15,7 +15,10 @@ test('default POST /v1/messages uses Go worker pool, not CLI', async () => {
     const tr = readTrace(gw)
     assert.equal(tr.via, 'go-worker')
     assert.ok(!tr.argv)
-    assert.equal(tr.system.length, 3)
+    // routing.json defaults to persona_preset=official_full, whose layout is
+    // billing + identity + agent + environment (docs/PROTOCOL.md). The older
+    // 3-block `rewrite` layout is no longer the shipped default.
+    assert.equal(tr.system.length, 4)
     assert.equal(tr.system[1].text, CRS_OFFICIAL_SYSTEM)
   } finally {
     await gw.stop()

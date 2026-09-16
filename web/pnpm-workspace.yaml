@@ -1,0 +1,6 @@
+# pnpm 10+ blocks dependency postinstall scripts by default. esbuild needs its
+# install step to place the native binary that vite/vitest execute, so allow
+# that one package and nothing else. Run pnpm from web/ so this file is the
+# workspace root it resolves.
+onlyBuiltDependencies:
+  - esbuild

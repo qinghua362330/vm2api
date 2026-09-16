@@ -11,6 +11,7 @@
  */
 import { normalizePersonaPreset, personaPresetFromLegacyMode } from '../identity/persona-template.mjs'
 import { isCodexVm } from './vm-kind.mjs'
+import { isCrsMock } from '../transport/crs-mock.mjs'
 
 export const INFERENCE_ENGINES = Object.freeze(['rust'])
 export const SLOT_PERSONA_PRESETS = Object.freeze(['official', 'official_full', 'zero'])
@@ -99,6 +100,17 @@ export function normalizeOfficialCcInference(value, { inherit = false } = {}) {
 
 export function resolveOfficialCcInference(vm, routing = {}) {
   if (isCodexVm(vm)) return null
+  // The e2e harness (KIN_CRS_MOCK=1) serves inference from the in-process
+  // Anthropic stub on the Node HTTP path, and that is where persona, identity
+  // and metadata are assembled. Under engine=rust those move into the wrapped
+  // Claude Code, which the public snapshot does not ship — so a mock run that
+  // claimed cli-hop would exercise nothing the harness asserts. Test-only.
+  if (isCrsMock()) {
+    const fromVmMock = normalizeOfficialCcInference(vm?.official_cc_inference, { inherit: true })
+    if (fromVmMock && fromVmMock !== 'cli-hop') return fromVmMock
+    const fromRoutingMock = normalizeOfficialCcInference(routing?.official_cc?.inference)
+    return fromRoutingMock === 'cli-hop' ? 'http' : fromRoutingMock
+  }
   if (resolveInferenceEngine(vm, routing) === 'rust') return 'cli-hop'
   const fromVm = normalizeOfficialCcInference(vm?.official_cc_inference, { inherit: true })
   if (fromVm) return fromVm

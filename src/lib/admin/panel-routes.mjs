@@ -16,6 +16,9 @@ import {
 import { loadDistillRules, saveDistillRules, validateDistillPatch } from '../core/distill-detect.mjs'
 import { isRefusalGuardEnabled, REFUSAL_GUARD_SETTING } from '../core/refusal-guard.mjs'
 import { RefusalGuardsRepo } from '../db/repos/refusal-guards-repo.mjs'
+// These were used below without ever being imported, so every panel route that
+// touched notify config threw "publicRoutingNotify is not defined" (500).
+import { mergeNotifyConfig, publicNotifyConfig, publicRoutingNotify, sendNotifyTest } from './notify.mjs'
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import {
   autoMigrateExhausted,
@@ -2936,7 +2939,22 @@ export function createPanelHandler(ctx) {
           })
         }
         const { applied: appliedDuringSwitch, ...publicEngineRuntime } = engineRuntime
-        const applied = appliedDuringSwitch ?? persistRoutingPatch(body)
+        // Persisting routing.json can fail (read-only mount, EISDIR when the
+        // path is a directory, full disk). Without this the raw fs error escaped
+        // as a 500 and the caller never saw the documented
+        // `routing_persist_failed`. The config on disk is untouched in that case.
+        let applied
+        try {
+          applied = appliedDuringSwitch ?? persistRoutingPatch(body)
+        } catch (error) {
+          return json(res, 503, {
+            ok: false,
+            error: {
+              code: 'routing_persist_failed',
+              message: String(error?.message || error),
+            },
+          })
+        }
         return json(
           res,
           200,

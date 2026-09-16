@@ -60,7 +60,7 @@ test('same x-session-id keeps native full history without CLI resume', async () 
   }
 })
 
-test('one sticky session holds across three protocols and stream', async () => {
+test('one sticky session holds across two protocols and stream', async () => {
   const gw = await startGateway({ mockText: 'ack' })
   try {
     const h = { 'x-session-id': 'conv-multi-proto-1', 'x-kin-forward': 'cli' }
@@ -82,14 +82,8 @@ test('one sticky session holds across three protocols and stream', async () => {
     assert.equal(trChat.argv, undefined)
     assert.match(JSON.stringify(trChat.body.messages), /p-openai-chat/)
 
-    const c = await api(gw, 'POST', '/v1/responses', {
-      headers: h,
-      body: { model: MODEL, input: 'p-openai-responses' },
-    })
-    assert.equal(c.status, 200, c.text)
-    const trResp = takeTrace(gw)
-    assert.equal(trResp.argv, undefined)
-    assert.match(JSON.stringify(trResp.body.messages), /p-openai-responses/)
+    // The /v1/responses leg was dropped along with the GPT/Codex surface:
+    // Claude models are refused there by an explicit guard in handle-protocol.mjs.
 
     const res = await fetch(gw.baseUrl + '/v1/messages', {
       method: 'POST',
@@ -120,7 +114,7 @@ test('one sticky session holds across three protocols and stream', async () => {
     const hit = sessions['conv-multi-proto-1']
     assert.ok(hit, `missing sticky bind: ${JSON.stringify(snap.json?.sticky)}`)
     assert.equal(hit.session_id, null)
-    assert.ok(hit.hits >= 4, `hits=${hit.hits}`)
+    assert.ok(hit.hits >= 3, `hits=${hit.hits}`)
     assert.equal(hit.vm_id, 'vm-sim-01')
     assert.equal(hit.account_id, 'acct-seed')
   } finally {

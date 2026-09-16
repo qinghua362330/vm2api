@@ -31,6 +31,14 @@ import { OFFICIAL_CLI_VERSION } from '../../src/lib/identity/vm-identity.mjs'
 const unix = process.platform !== 'win32'
 const unixTest = unix ? test : test.skip
 
+// Unix domain sockets have a hard path limit (104 bytes on macOS, 108 on Linux).
+// os.tmpdir() is ~49 bytes on macOS and the slot socket lives at
+// <root>/vms/<id>/run/kernel.sock, so a long tmpdir makes `listen()` fail with
+// EINVAL before any assertion runs. Production uses /opt/kin-gateway, which is
+// short — this is a test-environment concern only.
+const TMP_BASE = fs.existsSync('/tmp') ? '/tmp' : os.tmpdir()
+const mkTmp = (prefix) => fs.mkdtempSync(path.join(TMP_BASE, prefix))
+
 test('wrap system error is not a credential ensure; 401 still is', () => {
   assert.equal(
     isNeedsRefreshResult({
@@ -115,7 +123,7 @@ test('strict rust without binary is blocked', () => {
 })
 
 async function kernelFixture(handler) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-hop-'))
+  const root = mkTmp('kin-kernel-hop-')
   const slot = path.join(root, 'vms', 'vm-01')
   const runDir = path.join(slot, 'run')
   const homeDir = path.join(slot, 'cli-home')
@@ -292,7 +300,7 @@ unixTest('failed Go credential ensure is not followed by a blind Rust retry', as
   }
 })
 unixTest('unhealthy rust does not fall back to go', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-fb-'))
+  const root = mkTmp('kin-kernel-fb-')
   const slot = path.join(root, 'vm-01')
   const runDir = path.join(slot, 'run')
   const homeDir = path.join(slot, 'cli-home')
@@ -384,7 +392,7 @@ unixTest('pinned rust does not fall back to Go HTTP', async () => {
 unixTest('committed Rust stream transport failure is not replayed on Go', async () => {
   const previous = process.env.KIN_KERNEL_BIN
   process.env.KIN_KERNEL_BIN = '/bin/true'
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-committed-'))
+  const root = mkTmp('kin-kernel-committed-')
   const runDir = path.join(root, 'vm-01', 'run')
   const homeDir = path.join(root, 'vm-01', 'cli-home')
   fs.mkdirSync(runDir, { recursive: true })
@@ -442,7 +450,7 @@ unixTest('committed Rust stream transport failure is not replayed on Go', async 
 })
 
 test('writeKernelConfig separates container paths from host socket paths', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-cfg-'))
+  const root = mkTmp('kin-kernel-cfg-')
   const written = writeKernelConfig(root, { id: 'vm-09' }, { token: 'tok', proxyUrl: '', proxyRequired: false })
   const doc = JSON.parse(fs.readFileSync(written.configPath, 'utf8'))
   assert.equal(doc.vm_id, 'vm-09')
@@ -464,7 +472,7 @@ test('writeKernelConfig separates container paths from host socket paths', () =>
 })
 
 test('writeKernelConfig cli-hop writes local_cli without secrets', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-cli-hop-cfg-'))
+  const root = mkTmp('kin-kernel-cli-hop-cfg-')
   const written = writeKernelConfig(
     root,
     { id: 'vm-05', inference_engine: 'rust', timezone: 'America/New_York' },
@@ -491,7 +499,7 @@ test('writeKernelConfig cli-hop writes local_cli without secrets', () => {
 })
 
 test('writeKernelConfig uses identity layout when persona_inject is rewrite', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-identity-'))
+  const root = mkTmp('kin-kernel-identity-')
   const written = writeKernelConfig(
     root,
     { id: 'vm-05', inference_engine: 'rust' },
@@ -506,7 +514,7 @@ test('writeKernelConfig uses identity layout when persona_inject is rewrite', ()
 })
 
 test('writeKernelConfig strips leftover CONNECT https_proxy', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-preserve-proxy-'))
+  const root = mkTmp('kin-kernel-preserve-proxy-')
   const written = writeKernelConfig(
     root,
     { id: 'vm-10', inference_engine: 'rust' },
@@ -526,7 +534,7 @@ test('writeKernelConfig strips leftover CONNECT https_proxy', () => {
 })
 
 test('reconcileCliHopRuntime reaps zombies and unpauses without CONNECT', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-reconcile-'))
+  const root = mkTmp('kin-kernel-reconcile-')
   const written = writeKernelConfig(
     root,
     { id: 'vm-10', inference_engine: 'rust' },
@@ -620,7 +628,7 @@ test('wrapSlotCount always pre-opens max native slots', () => {
 })
 
 test('wrapNewerThanKernel is true after wrap files replace a stale sock', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-wrap-stale-'))
+  const root = mkTmp('kin-wrap-stale-')
   const home = path.join(root, 'vms', 'vm-10', 'cli-home')
   const kin = path.join(home, '.kin')
   const run = path.join(root, 'vms', 'vm-10', 'run')
@@ -647,7 +655,7 @@ test('wrapNewerThanKernel is true after wrap files replace a stale sock', () => 
 })
 
 test('writeKernelConfig cli-hop native slots ignore live 并行', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-cli-hop-slots-'))
+  const root = mkTmp('kin-kernel-cli-hop-slots-')
   const written = writeKernelConfig(
     root,
     {
@@ -663,7 +671,7 @@ test('writeKernelConfig cli-hop native slots ignore live 并行', () => {
 })
 
 unixTest('Rust supervisor recycles when ready_slots stay at 0', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-wedged-'))
+  const root = mkTmp('kin-kernel-wedged-')
   const written = writeKernelConfig(root, { id: 'vm-wedged' }, { token: 'tok', proxyUrl: '', proxyRequired: false })
   const exec = {
     vmId: 'vm-wedged',
@@ -708,7 +716,7 @@ unixTest('Rust supervisor recycles when ready_slots stay at 0', async () => {
 })
 
 unixTest('Rust supervisor launches the gateway worker with docker restart', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-container-'))
+  const root = mkTmp('kin-kernel-container-')
   const written = writeKernelConfig(root, { id: 'vm-container' }, { token: 'tok', proxyUrl: '', proxyRequired: false })
   const exec = {
     vmId: 'vm-container',
@@ -745,7 +753,7 @@ unixTest('Rust supervisor launches the gateway worker with docker restart', asyn
 })
 
 unixTest('pid1 kernel already booting is not docker-restarted', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-booting-'))
+  const root = mkTmp('kin-kernel-booting-')
   const written = writeKernelConfig(root, { id: 'vm-booting' }, { token: 'tok', proxyUrl: '', proxyRequired: false })
   const exec = {
     vmId: 'vm-booting',
@@ -783,7 +791,7 @@ unixTest('pid1 kernel already booting is not docker-restarted', async () => {
 })
 
 unixTest('concurrent Rust ensures issue one docker restart', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-concurrent-'))
+  const root = mkTmp('kin-kernel-concurrent-')
   const written = writeKernelConfig(root, { id: 'vm-concurrent' }, { token: 'tok', proxyUrl: '', proxyRequired: false })
   const exec = {
     vmId: 'vm-concurrent',
@@ -826,7 +834,7 @@ unixTest('concurrent Rust ensures issue one docker restart', async () => {
 })
 
 unixTest('Rust supervisor fails fast when kernel process never stays up', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-dead-'))
+  const root = mkTmp('kin-kernel-dead-')
   const written = writeKernelConfig(root, { id: 'vm-dead' }, { token: 'tok', proxyUrl: '', proxyRequired: false })
   const exec = {
     vmId: 'vm-dead',
@@ -856,7 +864,7 @@ unixTest('Rust supervisor fails fast when kernel process never stays up', async 
 })
 
 test('writeKernelConfig gates local upstream endpoints behind test mode', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-kernel-test-endpoint-cfg-'))
+  const root = mkTmp('kin-kernel-test-endpoint-cfg-')
   const previous = {
     enabled: process.env.KIN_KERNEL_TEST_ENDPOINTS,
     anthropic: process.env.KIN_ANTHROPIC_BASE_URL,
