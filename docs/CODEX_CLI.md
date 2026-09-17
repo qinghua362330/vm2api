@@ -176,6 +176,19 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 `gpt_model_policy`（`source: codex`）的。`luna` / `wm` 这类 slug 会被**故意过滤**——
 Codex 账号请求它们会 400。
 
+## 排障看哪儿
+
+请求日志默认就是开的（`KIN_REQUEST_LOG_MODE=off|normal|debug`，默认 `normal`）：摘要在
+`usage_logs` 表，全量（含 body）在 `request_log_debug`，控制台"日志"页读它。一次 codex
+请求在里面长这样 —— `via=codex-cli` 说明走的是 CLI 引擎，`vm_id` 是选中的槽：
+
+```
+model=gpt-5.5  status=502  error_code=codex_cli_failed  via=codex-cli  vm_id=vm-03
+```
+
+（流式请求如果已经发出 SSE 头，之后才失败，HTTP 状态留在 200，但 `error_code` 会照实记 ——
+状态码改不了，日志不改口。）
+
 ## 尚未做（下一步）
 
 1. 常驻 `codex app-server`（省掉每请求冷启动）；
