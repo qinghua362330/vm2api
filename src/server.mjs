@@ -22,6 +22,7 @@ import {
 } from './lib/core/security.mjs'
 import { loadModelPolicy } from './lib/protocol/model-policy.mjs'
 import { gatewayModelCatalog } from './lib/protocol/models.mjs'
+import { isCodexVm } from './lib/vm/vm-kind.mjs'
 import {
   createCredentialRefreshMonitor,
   normalizeCredentialRefreshConfig,
@@ -728,8 +729,19 @@ function requireAuth(req, res) {
   return true
 }
 
+/** 这套部署真的有哪种槽：目录按它过滤，免得客户端照着列表选到做不了的模型。 */
+function availableSlotKinds() {
+  try {
+    const kinds = new Set()
+    for (const vm of listVms(cfg.paths.project)) kinds.add(isCodexVm(vm) ? 'codex' : 'claude')
+    return kinds
+  } catch {
+    return null
+  }
+}
+
 function fetchWorkerModels() {
-  return gatewayModelCatalog()
+  return gatewayModelCatalog({ kinds: availableSlotKinds() })
 }
 
 const importCommit = createImportCommit({
@@ -1022,7 +1034,8 @@ const server = http.createServer(async (req, res) => {
       if (resolveInferenceBackend(req) === 'api') {
         return json(res, 200, apiScheduler.catalog())
       }
-      const result = await fetchWorkerModels()
+      // 目录按"真有哪种槽"过滤：codex-only 的部署不该把 Claude 模型发给客户端
+      const result = gatewayModelCatalog({ kinds: availableSlotKinds() })
       return json(res, 200, result)
     }
     if (req.method === 'POST' && p === '/admin/models/refresh') {

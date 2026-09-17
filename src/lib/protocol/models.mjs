@@ -60,17 +60,27 @@ function listGptPublicModels() {
 }
 
 /** Local catalog for GET /v1/models and boot. Does not touch workers. */
-export function gatewayModelCatalog() {
+/**
+ * 目录里列出什么模型。
+ *
+ * `kinds` 给的时候按"这套部署真的有哪种槽"过滤：只有 codex 槽的部署不该把 Claude
+ * 模型列出去 —— 客户端照着列表选，只会撞上"没有这种槽"的错误。不传 `kinds`
+ * （老调用方）时保持全量，行为不变。
+ */
+export function gatewayModelCatalog({ kinds = null } = {}) {
   seedModelCatalog()
   try {
     loadModelPolicy()
   } catch {}
   const gpt = listGptPublicModels()
   const claude = listOfficialModels()
+  const list = kinds instanceof Set && kinds.size ? kinds : null
+  const data = list ? [...(list.has('codex') ? gpt : []), ...(list.has('claude') ? claude : [])] : [...gpt, ...claude]
   return {
     object: 'list',
-    data: [...gpt, ...claude],
+    data,
     source: cache.source || 'model-policy',
+    ...(list ? { slot_kinds: [...list].sort() } : {}),
   }
 }
 

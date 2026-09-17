@@ -1,6 +1,10 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { classifyUpstreamResult, repairAnthropicRequest, shouldContinue } from './upstream-error-policy.mjs'
 import { hasRefreshPresence } from '../oauth/oauth-credentials.mjs'
 import { resolveOfficialCcInference } from '../vm/slot-engine.mjs'
+import { listVms } from '../vm/vm-registry.mjs'
+import { isCodexVm } from '../vm/vm-kind.mjs'
 
 const DEFAULTS = {
   max_account_switches: 10,
@@ -189,6 +193,25 @@ export class FailoverRunner {
     this.onFablePlanDenied = onFablePlanDenied
   }
 
+  /**
+   * 这套部署里到底有没有 Claude 槽。
+   *
+   * 只在"一个槽都没选出来"的收尾路径上问一次（不热），用来把"没有这种槽"和
+   * "槽都在忙/冷却"分开 —— 前者不该让客户端反复重试。
+   */
+  hasClaudeSlot() {
+    const projectRoot = this.scheduler?.projectRoot
+    if (!projectRoot) return true
+    // 读不到槽目录 = "不知道"，按老行为走（宁可让 failover 去排队，也不能把正常
+    // 请求误判成"这套部署没有 Claude 槽"）
+    if (!fs.existsSync(path.join(projectRoot, 'vms'))) return true
+    try {
+      return listVms(projectRoot).some((vm) => !isCodexVm(vm))
+    } catch {
+      return true
+    }
+  }
+
   forgetCredential(selected, policy) {
     this.stickyRouter?.unbindByAccount?.({
       accountId: selected?.accountId,
@@ -283,6 +306,17 @@ export class FailoverRunner {
         throw error
       }
       if (!selected?.ok) {
+        // "号池负载过高"只在真的还有 Claude 账号、只是排队/冷却时才对。整套部署只有
+        // codex 槽时（线上现在就是）渲染成"稍后再试"，会让人一直重试一个永远不可能
+        // 成功的路径 —— Claude 形状的请求（/v1/messages、Claude Code）在这个部署里
+        // 根本没有槽能服务，必须直说。
+        if (!this.hasClaudeSlot()) {
+          return poolError(
+            'no_claude_slot',
+            '本部署没有可用的 Claude 槽（当前槽都是 codex）：Claude 形状的请求无法服务，请改用 OpenAI 形状（/v1/responses 或 /v1/chat/completions）',
+            { reason: selected?.reason || 'no_claude_slot', eligible: selected?.eligible ?? 0 },
+          )
+        }
         return preferLastResult(
           lastResult,
           lastPolicy,

@@ -123,7 +123,10 @@ test('gatewayModelCatalog stays local and never hops', () => {
   )
   const src = fs.readFileSync(new URL('../../src/server.mjs', import.meta.url), 'utf8')
   assert.equal(src.includes('callWorkerGet'), false)
-  assert.match(src, /return gatewayModelCatalog\(\)/)
+  // 目录必须本地算（不 hop）。现在会带上"这套部署真有哪种槽"做过滤，
+  // 所以匹配调用本身，并额外确认过滤确实接上了。
+  assert.match(src, /gatewayModelCatalog\(/)
+  assert.match(src, /kinds: availableSlotKinds\(\)/)
 })
 
 test('models module never talks to Anthropic or a CLI binary', () => {
@@ -133,4 +136,24 @@ test('models module never talks to Anthropic or a CLI binary', () => {
   assert.equal(src.includes('spawnSync'), false)
   assert.equal(src.includes('child_process'), false)
   assert.equal(/user-agent.*claude-cli/.test(src), false)
+})
+
+test('目录按"真有哪种槽"过滤：codex-only 部署不列 Claude 模型', () => {
+  const codexOnly = gatewayModelCatalog({ kinds: new Set(['codex']) })
+  const ids = codexOnly.data.map((m) => m.id)
+  assert.ok(ids.length > 0)
+  assert.ok(
+    ids.every((id) => !String(id).startsWith('claude-')),
+    JSON.stringify(ids),
+  )
+  assert.ok(ids.some((id) => /^gpt-/i.test(id)))
+  assert.deepEqual(codexOnly.slot_kinds, ['codex'])
+
+  const both = gatewayModelCatalog({ kinds: new Set(['claude', 'codex']) })
+  assert.ok(both.data.some((m) => String(m.id).startsWith('claude-')))
+
+  // 老调用方（不传 kinds）保持全量，行为不变
+  const unfiltered = gatewayModelCatalog()
+  assert.equal(unfiltered.slot_kinds, undefined)
+  assert.ok(unfiltered.data.some((m) => String(m.id).startsWith('claude-')))
 })
