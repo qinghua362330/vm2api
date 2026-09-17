@@ -170,6 +170,7 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 | 客户端收到两条失败帧 | CLI 同时发 `error` 与 `turn.failed`，翻译层去重 |
 | 面板上额度永远 `0% / —`，上游其实回了 62% | `persistCodexQuotaSnapshot` 存的是**已算好的 view**，`summarizeCodexSlot` 读出来又喂回 `buildCodexUsageView`；老实现只认顶层 `primary_used_percent`，把 view 当 extra 解析 → 全 null。`snapshotOf()` 现在显式识别 view/snapshot/extra 三种输入 |
 | 槽详情显示 `7 天已用 100%`，列表却显示 `62.0%` | 单位不一致：卡片以为入参是 0..1 的比例又乘了 100（62 → 6200%，`Meter` 夹到 100%）。现在全前端统一按**百分比（0..100）**传递，归一化只在 `usedPctOf` / `usedPctOrNull` 里发生 |
+| 每个 codex 请求都回 `codex_cli_failed`，容器里却是 `OCI runtime exec failed: "/usr/local/bin/codex": no such file or directory` | 容器名字两边共用（`kin-<n>`）：槽从 Claude 转成 codex 后旧容器还占着这个名字（挂 cli-home + kin-worker，没有 codex）。现在靠 label 分辨形状（codex 容器带 `kin.vm.kind=codex`），启动时遇到错形状的旧容器先 `docker rm -f` 再按 codex 形状重建，请求侧回 `codex_slot_container_mismatch` |
 | `connect ENOENT /opt/vm2api/vms/<id>/run/worker.sock` | 拿 Claude 的协议问 codex 槽：`slotExec()` 一律拼 `cli-home`，Claude 形状的探针（oauth 状态、身份采集、额度/live 凭证采集）就去连一个**按设计不存在**的 worker.sock。现在 `slotExec()` 按类型给 `codex-home` 并带 `kind`，`workerPaths()` 对 codex exec 直接不解析 worker.sock，误用回 `codex_slot_not_go_worker` |
 
 ## 额度显示（为什么有时候是"—"）
@@ -212,10 +213,13 @@ SOCKS5 出去。面板上三处会显示它：槽详情的额度卡、`5 小时 
 1. 要槽的坐标就用 `slotExec(projectRoot, vm)` —— 它按类型给 `homeDir` 并带 `kind`；
    自己拼 `cli-home` 就是下一个 ENOENT。
 2. 要内核健康就用 `codexKernelHealth(slotExec(...))`，别用 `workerHealth`。
-3. **CLI 引擎的槽没有常驻 kernel**（每次请求 `docker exec` 跑一次 codex），所以
+3. **容器名字两边共用**（`kin-<n>`），只有 label 分得清：codex 容器带
+   `kin.vm.kind=codex`，Claude 容器只有 `kin.vm.id`。槽改类型后务必让容器按新形状
+   重建（`startCodexSlotRuntime` 现在会自动 `docker rm -f` 掉错形状的同名容器）。
+4. **CLI 引擎的槽没有常驻 kernel**（每次请求 `docker exec` 跑一次 codex），所以
    `GET /api/panel/oauth` 先解析引擎：`cli` 看凭证、`http` 才探 codex-kernel。
    否则一个完全正常的槽会因为 kernel 探活失败被标成 `ok: false`。
-4. 面板路由遇到 codex 槽要**回一句人话**（`identity_unsupported_for_codex`、
+5. 面板路由遇到 codex 槽要**回一句人话**（`identity_unsupported_for_codex`、
    `count_tokens_unsupported`…），而不是让它走到 connect 再抛裸 ENOENT ——
    看日志的人不该靠猜。
 
