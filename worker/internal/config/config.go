@@ -58,26 +58,26 @@ type TelemetryConfig struct {
 }
 
 type TelemetryIdentity struct {
-	DeviceID           string           `json:"device_id"`
-	UserID             string           `json:"user_id"`
-	AccountUUID        string           `json:"account_uuid"`
-	OrgUUID            string           `json:"org_uuid"`
-	Email              string           `json:"email"`
-	SessionID          string           `json:"session_id"`
-	SubscriptionType   string           `json:"subscription_type"`
-	Platform           string           `json:"platform"`
-	PlatformRaw        string           `json:"platform_raw"`
-	Arch               string           `json:"arch"`
-	NodeVersion        string           `json:"node_version"`
-	Locale             string           `json:"locale"`
-	Timezone           string           `json:"timezone"`
-	CLIVersion         string           `json:"cli_version"`
-	Entrypoint         string           `json:"entrypoint"`
-	Terminal           string           `json:"terminal"`
-	PackageManagers    string           `json:"package_managers"`
-	LinuxDistroID      string           `json:"linux_distro_id"`
-	LinuxDistroVersion string           `json:"linux_distro_version"`
-	LinuxKernel        string           `json:"linux_kernel"`
+	DeviceID           string `json:"device_id"`
+	UserID             string `json:"user_id"`
+	AccountUUID        string `json:"account_uuid"`
+	OrgUUID            string `json:"org_uuid"`
+	Email              string `json:"email"`
+	SessionID          string `json:"session_id"`
+	SubscriptionType   string `json:"subscription_type"`
+	Platform           string `json:"platform"`
+	PlatformRaw        string `json:"platform_raw"`
+	Arch               string `json:"arch"`
+	NodeVersion        string `json:"node_version"`
+	Locale             string `json:"locale"`
+	Timezone           string `json:"timezone"`
+	CLIVersion         string `json:"cli_version"`
+	Entrypoint         string `json:"entrypoint"`
+	Terminal           string `json:"terminal"`
+	PackageManagers    string `json:"package_managers"`
+	LinuxDistroID      string `json:"linux_distro_id"`
+	LinuxDistroVersion string `json:"linux_distro_version"`
+	LinuxKernel        string `json:"linux_kernel"`
 	// DeploymentEnvironment mirrors src/lib/identity/telemetry-env.mjs
 	// deploymentEnvironmentFor(). Empty means "derive from platform".
 	DeploymentEnvironment string           `json:"deployment_environment"`
