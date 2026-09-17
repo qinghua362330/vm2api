@@ -863,6 +863,9 @@ const server = http.createServer(async (req, res) => {
     // 都带前缀进来。在这里剥掉一次，后面的路由就能照旧按 /console、/assets、/api 匹配 ——
     // 不用给每个 handler 都加一遍前缀。
     const p = stripBasePath(url.pathname, BASE_PATH)
+    // 下游有的 handler 直接拿 url 自己解析路径（面板路由就是），所以剥离结果要写回去，
+    // 否则它们看到的是带前缀的路径，一路 404。
+    if (p !== url.pathname) url.pathname = p
 
     if (isTelemetryPath(p)) {
       return json(res, 200, telemetryInterceptResponse(p))
@@ -978,6 +981,7 @@ const server = http.createServer(async (req, res) => {
         status: 'ok',
         service: 'vm2api',
         base_url: cfg.base_url,
+        base_path: BASE_PATH || '/',
         rewrite: cfg.rewrite.enabled ? 'on' : 'off',
         intercept_rules: cfg.intercept.rules.length,
         active_vm: getActiveVmId(cfg.paths.project),
