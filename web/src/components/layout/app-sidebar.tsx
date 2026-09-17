@@ -8,9 +8,9 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar'
 import { AppTitle } from './app-title'
-import { navGroupsFor, sidebarData } from './data/sidebar-data'
 import { NavGroup } from './nav-group'
 import { NavUser } from './nav-user'
+import { navGroupsFor, sidebarData } from './sidebar-data'
 
 export function AppSidebar() {
   const { collapsible, variant } = useLayout()
