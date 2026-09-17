@@ -26,6 +26,14 @@ import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs
 import { BalanceLedger } from '../billing/balance-ledger.mjs'
 import { RedeemService } from '../billing/redeem-service.mjs'
 import { SubscriptionService } from '../billing/subscription-service.mjs'
+import { OrderService } from '../payment/orders.mjs'
+import {
+  PaymentConfigStore,
+  buildEasypayRedirect,
+  publicPaymentConfig,
+  usableChannels,
+} from '../payment/config.mjs'
+import { easypaySign } from '../payment/sign.mjs'
 import { AnnouncementsRepo } from '../db/repos/announcements-repo.mjs'
 import {
   autoMigrateExhausted,
@@ -672,6 +680,121 @@ export function createPanelHandler(ctx) {
           usageCache: getUsageCache(),
         })
         return json(res, 200, panel.ok(snapshot))
+      }
+      // ---- 支付 / 充值 ----
+      if (p === '/api/panel/payments' || p.startsWith('/api/panel/payments/')) {
+        const ident = panelIdentity(req)
+        const admin = ident.role === 'admin' || ident.role === 'super'
+        const orders = new OrderService()
+        const store = new PaymentConfigStore()
+
+        // A tenant may top up and read their own orders; everything else is admin.
+        if (req.method === 'POST' && p === '/api/panel/payments/checkout') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          const userId = admin && body.user_id ? String(body.user_id) : req.panelUserId
+          if (!userId) {
+            return json(res, 400, { ok: false, error: { message: 'user_id is required', code: 'user_required' } })
+          }
+          const config = store.get()
+          const available = usableChannels(config)
+          const channel = String(body.channel || available[0] || '').trim()
+          if (!available.includes(channel)) {
+            return json(res, 400, {
+              ok: false,
+              error: { message: 'payment channel is not configured', code: 'channel_unavailable', available },
+            })
+          }
+          const pkg = (config.packages || []).find((item) => item.id === body.package_id) || null
+          const amount = pkg ? pkg.amount : Number(body.amount)
+          const credit = pkg ? pkg.credit : body.credit == null ? amount : Number(body.credit)
+          if (!(amount >= (config.min_amount || 0))) {
+            return json(res, 400, {
+              ok: false,
+              error: { message: `amount must be at least ${config.min_amount}`, code: 'amount_too_small' },
+            })
+          }
+          const created = orders.create({
+            userId,
+            channel,
+            amount,
+            credit,
+            packageId: pkg?.id || null,
+            ttlMs: (config.order_ttl_minutes || 30) * 60 * 1000,
+          })
+          if (!created.ok) {
+            return json(res, 400, { ok: false, error: { message: created.reason, code: created.reason } })
+          }
+          const order = created.order
+          let payUrl = null
+          if (channel === 'easypay') {
+            const notifyUrl = `${cfg.base_url}/api/payment/notify/easypay`
+            const returnUrl = `${cfg.base_url}/console`
+            const sign = easypaySign(
+              {
+                pid: config.channels.easypay.pid,
+                out_trade_no: order.order_no,
+                money: Number(order.amount).toFixed(2),
+                name: `充值 ${order.amount}`,
+                notify_url: notifyUrl,
+                return_url: returnUrl,
+                type: 'alipay',
+              },
+              config.channels.easypay.key,
+            )
+            payUrl = buildEasypayRedirect({ order, config, notifyUrl, returnUrl, sign })
+          }
+          return json(res, 200, panel.ok({ order, pay_url: payUrl }))
+        }
+
+        if (req.method === 'GET' && p === '/api/panel/payments/mine') {
+          const userId = admin && url.searchParams.get('user_id') ? url.searchParams.get('user_id') : req.panelUserId
+          return json(res, 200, panel.ok({ orders: orders.list({ userId, limit: 100 }) }))
+        }
+        if (req.method === 'GET' && p === '/api/panel/payments/orders') {
+          if (!admin) {
+            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+          }
+          const status = String(url.searchParams.get('status') || '').trim() || null
+          return json(
+            res,
+            200,
+            panel.ok({
+              orders: orders.list({ status, limit: Number(url.searchParams.get('limit')) || 200 }),
+              totals: orders.totals(),
+            }),
+          )
+        }
+        if (req.method === 'GET' && p === '/api/panel/payments/config') {
+          if (!admin) {
+            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+          }
+          return json(
+            res,
+            200,
+            panel.ok({ config: publicPaymentConfig(store.get()), usable_channels: usableChannels(store.get()) }),
+          )
+        }
+        if ((req.method === 'PUT' || req.method === 'PATCH') && p === '/api/panel/payments/config') {
+          if (!admin) {
+            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+          }
+          const body = await readBody(req, 128 * 1024).catch(() => ({}))
+          const saved = store.set(body)
+          return json(res, 200, panel.ok({ config: publicPaymentConfig(saved), usable_channels: usableChannels(saved) }))
+        }
+        const confirm = p.match(/^\/api\/panel\/payments\/orders\/([^/]+)\/confirm$/)
+        if (confirm && req.method === 'POST') {
+          if (!admin) {
+            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+          }
+          const result = orders.markPaid({
+            orderNo: decodeURIComponent(confirm[1]),
+            providerTradeNo: `manual:${ident.username || 'admin'}`,
+            raw: JSON.stringify({ manual_by: ident.username || 'admin' }),
+          })
+          return json(res, result.ok ? 200 : 400, panel.ok(result))
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
       // ---- 订阅 ----
       if (p === '/api/panel/subscriptions' || p.startsWith('/api/panel/subscriptions/')) {

@@ -24,6 +24,7 @@ import { Route as AuthenticatedKeysRouteImport } from './routes/_authenticated/k
 import { Route as AuthenticatedLogsRouteImport } from './routes/_authenticated/logs'
 import { Route as AuthenticatedModelsRouteImport } from './routes/_authenticated/models'
 import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticated/overview'
+import { Route as AuthenticatedPaymentsRouteImport } from './routes/_authenticated/payments'
 import { Route as AuthenticatedProtocolRouteImport } from './routes/_authenticated/protocol'
 import { Route as AuthenticatedProxiesRouteImport } from './routes/_authenticated/proxies'
 import { Route as AuthenticatedRedeemRouteImport } from './routes/_authenticated/redeem'
@@ -113,6 +114,11 @@ const AuthenticatedOverviewRoute = AuthenticatedOverviewRouteImport.update({
   path: '/overview',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPaymentsRoute = AuthenticatedPaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedProtocolRoute = AuthenticatedProtocolRouteImport.update({
   id: '/protocol',
   path: '/protocol',
@@ -199,6 +205,7 @@ export interface FileRoutesByFullPath {
   '/logs': typeof AuthenticatedLogsRoute
   '/models': typeof AuthenticatedModelsRoute
   '/overview': typeof AuthenticatedOverviewRoute
+  '/payments': typeof AuthenticatedPaymentsRoute
   '/protocol': typeof AuthenticatedProtocolRoute
   '/proxies': typeof AuthenticatedProxiesRoute
   '/redeem': typeof AuthenticatedRedeemRoute
@@ -227,6 +234,7 @@ export interface FileRoutesByTo {
   '/logs': typeof AuthenticatedLogsRoute
   '/models': typeof AuthenticatedModelsRoute
   '/overview': typeof AuthenticatedOverviewRoute
+  '/payments': typeof AuthenticatedPaymentsRoute
   '/protocol': typeof AuthenticatedProtocolRoute
   '/proxies': typeof AuthenticatedProxiesRoute
   '/redeem': typeof AuthenticatedRedeemRoute
@@ -258,6 +266,7 @@ export interface FileRoutesById {
   '/_authenticated/logs': typeof AuthenticatedLogsRoute
   '/_authenticated/models': typeof AuthenticatedModelsRoute
   '/_authenticated/overview': typeof AuthenticatedOverviewRoute
+  '/_authenticated/payments': typeof AuthenticatedPaymentsRoute
   '/_authenticated/protocol': typeof AuthenticatedProtocolRoute
   '/_authenticated/proxies': typeof AuthenticatedProxiesRoute
   '/_authenticated/redeem': typeof AuthenticatedRedeemRoute
@@ -290,6 +299,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/models'
     | '/overview'
+    | '/payments'
     | '/protocol'
     | '/proxies'
     | '/redeem'
@@ -318,6 +328,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/models'
     | '/overview'
+    | '/payments'
     | '/protocol'
     | '/proxies'
     | '/redeem'
@@ -348,6 +359,7 @@ export interface FileRouteTypes {
     | '/_authenticated/logs'
     | '/_authenticated/models'
     | '/_authenticated/overview'
+    | '/_authenticated/payments'
     | '/_authenticated/protocol'
     | '/_authenticated/proxies'
     | '/_authenticated/redeem'
@@ -476,6 +488,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOverviewRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/payments': {
+      id: '/_authenticated/payments'
+      path: '/payments'
+      fullPath: '/payments'
+      preLoaderRoute: typeof AuthenticatedPaymentsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/protocol': {
       id: '/_authenticated/protocol'
       path: '/protocol'
@@ -583,6 +602,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedLogsRoute: typeof AuthenticatedLogsRoute
   AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
   AuthenticatedOverviewRoute: typeof AuthenticatedOverviewRoute
+  AuthenticatedPaymentsRoute: typeof AuthenticatedPaymentsRoute
   AuthenticatedProtocolRoute: typeof AuthenticatedProtocolRoute
   AuthenticatedProxiesRoute: typeof AuthenticatedProxiesRoute
   AuthenticatedRedeemRoute: typeof AuthenticatedRedeemRoute
@@ -612,6 +632,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedLogsRoute: AuthenticatedLogsRoute,
   AuthenticatedModelsRoute: AuthenticatedModelsRoute,
   AuthenticatedOverviewRoute: AuthenticatedOverviewRoute,
+  AuthenticatedPaymentsRoute: AuthenticatedPaymentsRoute,
   AuthenticatedProtocolRoute: AuthenticatedProtocolRoute,
   AuthenticatedProxiesRoute: AuthenticatedProxiesRoute,
   AuthenticatedRedeemRoute: AuthenticatedRedeemRoute,

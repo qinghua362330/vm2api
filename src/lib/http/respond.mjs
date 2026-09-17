@@ -123,3 +123,58 @@ export function createRespond(cfg, options = {}) {
 
   return { json, writeSSEHeaders, readBody, corsHeaders }
 }
+
+/**
+ * Read the request body as a string, without parsing.
+ *
+ * Signature verification needs the exact bytes: re-serialising JSON changes key
+ * order and whitespace, and a Stripe HMAC over a re-serialised body never
+ * matches. Form-encoded callbacks (易支付) are not JSON at all.
+ */
+export function readRawBody(req, maxBytes = 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    let settled = false
+    const fail = (error) => {
+      if (settled) return
+      settled = true
+      req.removeAllListeners('data')
+      req.on('data', () => {})
+      req.resume()
+      reject(error)
+    }
+    req.on('data', (c) => {
+      if (settled) return
+      size += c.length
+      if (size > maxBytes) {
+        fail(
+          makeError({
+            type: ErrorType.INVALID_REQUEST,
+            code: ErrorCode.BODY_TOO_LARGE,
+            message: `Request body exceeds limit of ${maxBytes} bytes`,
+            status: 413,
+            details: { max_bytes: maxBytes, received: size },
+          }),
+        )
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      if (settled) return
+      settled = true
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', (e) =>
+      fail(
+        makeError({
+          type: ErrorType.API,
+          code: 'request_stream_error',
+          message: String(e.message || e),
+          status: 400,
+        }),
+      ),
+    )
+  })
+}

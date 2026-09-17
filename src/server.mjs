@@ -30,6 +30,10 @@ import { createKernelWatchdog, normalizeKernelWatchdogConfig } from './lib/trans
 
 import { createUsageProbeMonitor, normalizeUsageProbeConfig } from './lib/oauth/usage-probe-monitor.mjs'
 import { createEgressMigrationMonitor } from './lib/pool/egress-migration-monitor.mjs'
+import { readRawBody } from './lib/http/respond.mjs'
+import { OrderService } from './lib/payment/orders.mjs'
+import { PaymentConfigStore } from './lib/payment/config.mjs'
+import { EASYPAY_ACK, easypayTradeSuccess, verifyEasypay, verifyStripeSignature } from './lib/payment/sign.mjs'
 import { EgressBindingsRepo } from './lib/db/repos/egress-bindings-repo.mjs'
 import { normalizeOfficialCcConfig } from './lib/oauth/official-cc-bootstrap.mjs'
 import { invalidateLiveCredentialCache } from './lib/admin/panel-live-credentials.mjs'
@@ -860,6 +864,85 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/admin') || p.startsWith('/api/panel')) {
       const handled = await handlePanel(req, res, url)
       if (handled !== false) return
+    }
+
+    // ---- 支付回调（公开，靠签名而不是靠鉴权）----
+    // 网关会重投，用户也会刷新 return URL，所以这里必须幂等：入账只发生一次。
+    if (req.method === 'POST' && p === '/api/payment/notify/easypay') {
+      const config = new PaymentConfigStore().get()
+      const key = config.channels.easypay.key
+      let params = {}
+      try {
+        const raw = await readRawBody(req, 64 * 1024)
+        params = Object.fromEntries(new URLSearchParams(raw))
+      } catch {
+        return json(res, 400, { error: { message: 'bad body', code: 'bad_body' } })
+      }
+      if (!config.enabled || !config.channels.easypay.enabled || !key) {
+        return json(res, 503, { error: { message: 'easypay not configured', code: 'channel_unavailable' } })
+      }
+      const verified = verifyEasypay(params, key)
+      if (!verified.ok) {
+        console.warn('[payment] easypay callback rejected:', verified.reason)
+        // 不要回 success：回执决定网关是否重投，签名不对就不该被确认。
+        return json(res, 400, { error: { message: verified.reason, code: verified.reason } })
+      }
+      if (!easypayTradeSuccess(params)) {
+        // 未支付状态的回调要明确确认，否则会被无限重投。
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        return res.end(EASYPAY_ACK)
+      }
+      const settled = new OrderService().markPaid({
+        orderNo: params.out_trade_no,
+        providerTradeNo: params.trade_no || null,
+        paidAmount: params.money,
+        raw: JSON.stringify({ ...params, sign: '[redacted]' }),
+      })
+      if (!settled.ok && !settled.alreadyPaid) {
+        console.warn('[payment] easypay settle failed:', settled.reason)
+        return json(res, 400, { error: { message: settled.reason, code: settled.reason } })
+      }
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      return res.end(EASYPAY_ACK)
+    }
+
+    if (req.method === 'POST' && p === '/api/payment/webhook/stripe') {
+      const config = new PaymentConfigStore().get()
+      const secret = config.channels.stripe.webhook_secret
+      let raw = ''
+      try {
+        raw = await readRawBody(req, 256 * 1024)
+      } catch {
+        return json(res, 400, { error: { message: 'bad body', code: 'bad_body' } })
+      }
+      if (!config.enabled || !config.channels.stripe.enabled || !secret) {
+        return json(res, 503, { error: { message: 'stripe not configured', code: 'channel_unavailable' } })
+      }
+      const verified = verifyStripeSignature(raw, req.headers['stripe-signature'], secret)
+      if (!verified.ok) {
+        console.warn('[payment] stripe webhook rejected:', verified.reason)
+        return json(res, 400, { error: { message: verified.reason, code: verified.reason } })
+      }
+      let event = null
+      try {
+        event = JSON.parse(raw)
+      } catch {
+        return json(res, 400, { error: { message: 'bad json', code: 'bad_json' } })
+      }
+      if (event?.type === 'checkout.session.completed') {
+        const session = event.data?.object || {}
+        const settled = new OrderService().markPaid({
+          orderNo: session.client_reference_id || session.metadata?.order_no,
+          providerTradeNo: session.payment_intent || session.id || null,
+          paidAmount: session.amount_total == null ? null : Number(session.amount_total) / 100,
+          raw: JSON.stringify({ id: event.id, type: event.type }),
+        })
+        if (!settled.ok && !settled.alreadyPaid) {
+          console.warn('[payment] stripe settle failed:', settled.reason)
+          return json(res, 400, { error: { message: settled.reason, code: settled.reason } })
+        }
+      }
+      return json(res, 200, { received: true })
     }
 
     if (req.method === 'GET' && tryServeWebDist(res, cfg.paths.project, p)) return
