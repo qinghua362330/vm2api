@@ -239,14 +239,26 @@ export function codexContainerInUse(vm, ops = {}) {
   }
 }
 
+/**
+ * 槽的宿主侧坐标。
+ *
+ * `homeDir` 必须按凭证类型给：codex 槽没有 `cli-home`，它的 home 是 `codex-home`
+ * （容器里 `CODEX_HOME=/home/kincli/.codex`）。以前这里一律拼 `cli-home`，于是
+ * codex 槽的 runDir 落成 `vms/<id>/run`，所有 Claude 形状的探针（worker health、
+ * 身份采集、额度探测）都去连一个按设计不存在的 `worker.sock`，报出来是一句裸的
+ * `connect ENOENT /opt/vm2api/vms/<id>/run/worker.sock` —— 看着像文件丢了，
+ * 其实是"拿错协议问错了槽"。`kind` 让调用方能一眼判断该不该走这条路。
+ */
 export function slotExec(projectRoot, vm) {
   if (!projectRoot || !vm?.id) return null
+  const codex = isCodexVm(vm)
   return {
     vmId: vm.id,
     accountId: vm.claude?.account_uuid || vm.id,
     vm,
     vmPath: path.join(projectRoot, 'vms', `${vm.id}.json`),
-    homeDir: path.join(projectRoot, 'vms', vm.id, 'cli-home'),
+    kind: codex ? 'codex' : 'claude',
+    homeDir: path.join(projectRoot, 'vms', vm.id, codex ? 'codex-home' : 'cli-home'),
     timezone: vm.timezone || 'UTC',
     locale: vm.locale || 'en_US.UTF-8',
     kernel: vm.kernel || null,

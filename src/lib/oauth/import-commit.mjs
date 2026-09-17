@@ -128,6 +128,18 @@ export function createImportCommit(ctx) {
   }
 
   async function commitImportedOauth({ vmId, vmPath, existing, oauth, source, name, skipOfficialCc = false }) {
+    // 导入路由已经按类型分流；这里再兜一层，免得将来有人把 Claude 凭证塞进
+    // codex 槽：那样会写进 cli-home 并去连一个不存在的 worker.sock
+    if (isCodexVm(existing)) {
+      return {
+        ok: false,
+        status: 400,
+        error: {
+          code: 'claude_credential_on_codex_slot',
+          message: 'codex 槽只接受 ChatGPT/Codex 凭证（access_token / refresh_token）',
+        },
+      }
+    }
     const importedCredential = importedCredentialFromOauth(oauth, existing)
     const workerExec = {
       vmId,

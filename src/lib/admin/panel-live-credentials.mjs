@@ -7,6 +7,7 @@
 import { expiresAtToMs, mirrorWorkerCredentialsToVm, readSlotCredentialIdentity } from '../oauth/oauth-credentials.mjs'
 import { workerHealth } from '../transport/go-worker-client.mjs'
 import { vmJsonPath } from '../vm/execution-context.mjs'
+import { isCodexVm } from '../vm/vm-kind.mjs'
 import { slotExec } from '../vm/slot-runtime.mjs'
 import { CREDENTIAL_REFRESH_FAIL } from '../pool/availability.mjs'
 
@@ -102,6 +103,9 @@ export async function collectLivePanelCredentials(
   const list = Array.isArray(vms) ? vms.filter((vm) => vm?.id) : []
   const map = new Map()
   await mapPool(list, concurrency, async (vm) => {
+    // codex 槽没有 go worker：它的凭证身份在 `codex-credentials.json`（面板走
+    // summarizeCodexSlot），探 worker.sock 只会白等一个超时并回一句 ENOENT
+    if (isCodexVm(vm)) return
     const exec = slotExec(projectRoot, vm)
     if (!exec) return
     const file = readSlotCredentialIdentity(exec.homeDir)

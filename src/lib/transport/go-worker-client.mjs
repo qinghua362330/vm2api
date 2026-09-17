@@ -13,18 +13,41 @@ import {
 } from '../oauth/oauth-credentials.mjs'
 import { refreshSlotCredentialIfNeeded } from '../oauth/host-token-refresh.mjs'
 import { hostCountTokens, hostModels, hostOauthUsage } from '../oauth/host-anthropic.mjs'
+import { isCodexVm } from '../vm/vm-kind.mjs'
 
 const MAX_BODY = 64 * 1024 * 1024
+
+/**
+ * 这个 exec 指向的槽有没有 go worker。
+ *
+ * codex 槽的内核是 codex-kernel（socket 叫 `codex-kernel.sock`），**没有** worker
+ * socket。以前这里照样拼出 `vms/<id>/run/worker.sock`，连不上时报的是裸的
+ * `connect ENOENT …`，看日志的人只会去找"文件怎么没了"，而真相是协议用错了。
+ * 显式给了 `worker_socket` 的照旧（`codex-kernel-client` 就是靠它把 socket 换成
+ * codex-kernel.sock，那条路是合法的）。
+ */
+export function isCodexExec(exec = {}) {
+  if (exec.kind === 'codex') return true
+  return isCodexVm(exec.vm || {})
+}
 
 export function workerPaths(exec = {}) {
   const slotRoot = exec.homeDir ? path.dirname(exec.homeDir) : null
   const runDir = exec.vm?.runtime?.worker_run_dir || (slotRoot ? path.join(slotRoot, 'run') : null)
+  const explicit = exec.vm?.runtime?.worker_socket || null
+  const codexSlot = !explicit && isCodexExec(exec)
   return {
     runDir,
-    socketPath: exec.vm?.runtime?.worker_socket || (runDir ? path.join(runDir, 'worker.sock') : null),
+    socketPath: explicit || (runDir && !codexSlot ? path.join(runDir, 'worker.sock') : null),
     tokenPath: exec.vm?.runtime?.worker_token_file || (runDir ? path.join(runDir, 'internal.token') : null),
+    codexSlot,
   }
 }
+
+/** 走错协议时的统一答复：说清"该走哪条路"，而不是丢一个 ENOENT。 */
+export const CODEX_SLOT_NOT_WORKER = 'codex_slot_not_go_worker'
+export const CODEX_SLOT_NOT_WORKER_MESSAGE =
+  '该槽是 codex 槽，没有 go worker socket：codex 走 codex-kernel / codex CLI，不走 worker.sock'
 
 function readInternalToken(exec) {
   const { tokenPath } = workerPaths(exec)
@@ -41,9 +64,13 @@ function workerRequest(
   { method = 'GET', requestPath, body = null, signal, timeoutMs = 180000, timeoutMode = 'overall', headers = {} } = {},
 ) {
   return new Promise((resolve, reject) => {
-    const { socketPath } = workerPaths(exec)
+    const { socketPath, codexSlot } = workerPaths(exec)
     if (!socketPath) {
-      reject(Object.assign(new Error('slot worker socket is not configured'), { code: 'worker_socket_missing' }))
+      reject(
+        Object.assign(new Error(codexSlot ? CODEX_SLOT_NOT_WORKER_MESSAGE : 'slot worker socket is not configured'), {
+          code: codexSlot ? CODEX_SLOT_NOT_WORKER : 'worker_socket_missing',
+        }),
+      )
       return
     }
     const payload = body == null ? null : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))

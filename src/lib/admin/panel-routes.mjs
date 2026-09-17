@@ -421,27 +421,33 @@ export function createPanelHandler(ctx) {
     }
   }
 
+  /**
+   * Claude 槽的 worker 坐标。**codex 槽返回 null**：它没有 go worker，返回一个
+   * cli-home 形状的 exec 只会让调用方在 connect 时撞上裸的 ENOENT。需要 codex 的
+   * 坐标用 `slotExec()`（按类型给 home），需要 codex 的健康用 `codexKernelHealth`。
+   */
   function workerExecForVm(id) {
     const vm = getVm(cfg.paths.project, id)
-    if (!vm) return null
+    if (!vm || isCodexVm(vm)) return null
     return {
       vmId: id,
       accountId: vm.claude?.account_uuid || id,
       vm,
+      kind: 'claude',
       homeDir: path.join(cfg.paths.project, 'vms', id, 'cli-home'),
       vmPath: path.join(cfg.paths.project, 'vms', `${id}.json`),
     }
   }
 
   async function panelKernelHealth({ id }) {
-    const exec = workerExecForVm(id)
-    const vm = exec?.vm || getVm(cfg.paths.project, id)
-    if (!exec || !vm) {
+    const vm = getVm(cfg.paths.project, id)
+    if (!vm) {
       const missing = { reachable: false, status: null, error_code: 'vm_not_found' }
-      return isCodexVm(vm) ? { codex: missing } : { go: missing, rust: missing }
+      return { go: missing, rust: missing }
     }
     if (isCodexVm(vm)) {
-      const health = await codexKernelHealth(exec, { timeoutMs: 600 })
+      // codex 槽的健康问 codex-kernel；坐标走 slotExec（按类型给 codex-home）
+      const health = await codexKernelHealth(slotExec(cfg.paths.project, vm), { timeoutMs: 600 })
       return {
         codex: {
           ...toPublicKernelHealth(health, 'codex'),
@@ -450,6 +456,11 @@ export function createPanelHandler(ctx) {
           vm_id: health?.vm_id || id,
         },
       }
+    }
+    const exec = workerExecForVm(id)
+    if (!exec) {
+      const missing = { reachable: false, status: null, error_code: 'vm_not_found' }
+      return { go: missing, rust: missing }
     }
     const [go, rust] = await Promise.all([
       workerHealth(exec, { timeoutMs: 600 }),
@@ -550,8 +561,43 @@ export function createPanelHandler(ctx) {
     })
   }
 
+  /**
+   * 槽的 OAuth/凭证状态。
+   *
+   * 这里以前无条件走 go worker。vm-03 是 codex 槽（而且是 active vm），go worker
+   * 在它身上根本不存在，于是这个接口稳定回一句
+   * `connect ENOENT /opt/vm2api/vms/vm-03/run/worker.sock` —— 看着像文件丢了，
+   * 其实是拿 Claude 的协议问 codex 槽。现在按类型分流：codex 问 codex-kernel，
+   * 凭证答案来自 `codex-credentials.json`。
+   */
   async function oauthStatusWithWorker(id = null) {
     const vmId = id || getActiveVmId(cfg.paths.project)
+    const vm = getVm(cfg.paths.project, vmId)
+    if (!vm) return { ok: false, vm_id: vmId, error: 'vm_not_found' }
+    if (isCodexVm(vm)) {
+      const exec = slotExec(cfg.paths.project, vm)
+      const kernel = await codexKernelHealth(exec, { timeoutMs: 1500 })
+      const slot = summarizeCodexSlot(cfg.paths.project, vm)
+      return {
+        ok: !!kernel?.ok,
+        vm_id: vmId,
+        platform: 'openai',
+        refresh_owner: 'codex-cli',
+        proxy_required: true,
+        kernel: {
+          ...toPublicKernelHealth(kernel, 'codex'),
+          proxy_ok: kernel?.proxy_ok ?? null,
+          accounts: kernel?.accounts ?? null,
+        },
+        credential: {
+          has_access: !!slot.has_token,
+          has_refresh: !!slot.has_refresh,
+          email: slot.email || null,
+          expires_at: slot.expires_at || null,
+          account_count: slot.account_count || 0,
+        },
+      }
+    }
     const exec = workerExecForVm(vmId)
     if (!exec) return { ok: false, vm_id: vmId, error: 'vm_not_found' }
     const health = await workerHealth(exec)
@@ -2284,6 +2330,17 @@ export function createPanelHandler(ctx) {
         const id = p.split('/')[4]
         const vm = getVm(cfg.paths.project, id)
         if (!vm) return json(res, 404, { ok: false, error: { message: 'vm not found' } })
+        // 身份靠槽内 `/internal/identity` 采集；codex 的 kin-codex-kernel 只提供
+        // /internal/v1/codex/responses，所以这里如实说明，不去连不存在的 worker.sock
+        if (isCodexVm(vm)) {
+          return json(res, 400, {
+            ok: false,
+            error: {
+              code: 'identity_unsupported_for_codex',
+              message: 'codex 槽暂不支持身份采集（kin-codex-kernel 还没有 /internal/identity）',
+            },
+          })
+        }
         const collected = await collectSlotIdentity(cfg.paths.project, vm)
         if (!collected.ok) {
           return json(res, 502, {
@@ -2478,6 +2535,16 @@ export function createPanelHandler(ctx) {
         const id = p.split('/')[4]
         const vm = getVm(cfg.paths.project, id)
         if (!vm) return json(res, 404, { ok: false, error: { code: 'vm_not_found', message: 'vm not found' } })
+        // count_tokens 是 Claude 的接口形状；codex 槽没有 worker，别让它走到 connect
+        if (isCodexVm(vm)) {
+          return json(res, 400, {
+            ok: false,
+            error: {
+              code: 'count_tokens_unsupported',
+              message: 'codex 槽不支持 count_tokens（Claude 形状的接口），codex 的用量看 /v1/responses 的 usage',
+            },
+          })
+        }
         const mode = credentialModeOfVm(vm)
         if (!isSetupTokenMode(mode) && !isApiKeyMode(mode)) {
           return json(res, 400, {
