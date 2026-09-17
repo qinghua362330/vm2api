@@ -464,16 +464,24 @@ test('容器模式写下的 kernel 配置要交给槽的 uid（否则容器里 P
       ops: { chown: (file, target) => chowned.push([file, slotUidFor(target)]) },
     })
     const uid = slotUidFor(vm)
-    const wantFiles = [written.configPath, written.tokenPath, written.credentialPath, written.runDir]
+    // 注入 chown 时只断言 supervisor 自己负责的那三处；`credentialPath` 在容器模式下是
+    // **容器内**路径，真正要交给槽的是宿主那份 .codex/credentials.json（下一段断言）
+    const wantFiles = [written.configPath, written.tokenPath, written.runDir]
     assert.deepEqual(
       chowned.map(([file]) => file).sort(),
       wantFiles.slice().sort(),
-      'config / token / 凭证 / 运行目录都要交给槽的 uid',
+      'config / token / 运行目录都要交给槽的 uid',
     )
     for (const [, owner] of chowned) assert.equal(owner, uid)
+    assert.equal(
+      chowned.some(([file]) => String(file).startsWith('/home/kincli')),
+      false,
+      '容器内路径不能拿去 chown 宿主文件',
+    )
     // 真跑在 root 上（部署环境）时，顺带验一次真实属主
     if (typeof process.getuid === 'function' && process.getuid() === 0) {
-      for (const file of wantFiles) {
+      const credHost = path.join(project, 'vms', 'vm-7', 'codex-home', '.codex', 'credentials.json')
+      for (const file of [...wantFiles, credHost]) {
         const st = fs.statSync(file)
         assert.equal(st.uid, uid, `${file} 的属主应是槽 uid ${uid}`)
         assert.equal(st.gid, Number(SLOT_GID))

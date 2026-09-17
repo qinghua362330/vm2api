@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { boundProxyUrl } from '../vm/egress.mjs'
 import { SLOT_GID, chownForSlot, slotUidFor } from '../vm/slot-uid.mjs'
+import { chownCodexHome } from '../vm/codex-home.mjs'
 import { codexKernelHealth, codexKernelPaths } from './codex-kernel-client.mjs'
 
 const starts = new Map()
@@ -99,10 +100,13 @@ export function writeCodexKernelConfig(
     // 容器里的 kernel 以槽的 uid 运行：宿主写的 config / token / 凭证必须交给它，
     // 否则它读到的是 Permission denied，而宿主侧只看到"内核起不来"。
     const chown = ops.chown || chownForSlot
-    for (const file of [configPath, tokenPath, credentialPath]) {
+    // 注意：容器模式下 credentialPath 是**容器内**路径，chown 它等于 chown 一个不存在
+    // 的宿主路径（静默失败）—— 真实宿主文件由 chownCodexHome 负责。
+    for (const file of [configPath, tokenPath]) {
       if (file) chown(file, vm)
     }
     chown(runDir, vm)
+    if (!ops.chown) chownCodexHome(projectRoot, vm.id, vm)
   }
   return { runDir, socketPath, configPath, credentialPath, tokenPath }
 }
