@@ -11,10 +11,11 @@
 
 import { getDb, withTransaction } from '../database.mjs'
 
-const EGRESS_COLUMNS = ['user_id', 'egress_id', 'reason', 'bound_by', 'bound_at', 'updated_at']
+const EGRESS_COLUMNS = ['user_id', 'kind', 'egress_id', 'reason', 'bound_by', 'bound_at', 'updated_at']
 
 const SLOT_COLUMNS = [
   'user_id',
+  'kind',
   'slot_id',
   'egress_id',
   'reason',
@@ -46,8 +47,8 @@ export class EgressBindingsRepo {
     this._listEgress = db.prepare('SELECT * FROM proxies WHERE deleted_at IS NULL ORDER BY created_at, id')
     this._setEgressIdentity = db.prepare('UPDATE proxies SET kind = ?, identity = ?, updated_at = ? WHERE id = ?')
 
-    this._getEgressBinding = db.prepare('SELECT * FROM user_egress_bindings WHERE user_id = ?')
-    this._listEgressBindings = db.prepare('SELECT * FROM user_egress_bindings ORDER BY user_id')
+    this._getEgressBinding = db.prepare('SELECT * FROM user_egress_bindings WHERE user_id = ? AND kind = ?')
+    this._listEgressBindings = db.prepare('SELECT * FROM user_egress_bindings WHERE kind = ? ORDER BY user_id')
     this._insertEgressBinding = db.prepare(`
       INSERT OR IGNORE INTO user_egress_bindings (${EGRESS_COLUMNS.join(', ')})
       VALUES (${EGRESS_COLUMNS.map(() => '?').join(', ')})
@@ -55,37 +56,41 @@ export class EgressBindingsRepo {
     this._updateEgressBinding = db.prepare(`
       UPDATE user_egress_bindings
          SET egress_id = ?, reason = ?, bound_by = ?, bound_at = ?, updated_at = ?
-       WHERE user_id = ?
+       WHERE user_id = ? AND kind = ?
     `)
-    this._deleteEgressBinding = db.prepare('DELETE FROM user_egress_bindings WHERE user_id = ?')
+    this._deleteEgressBinding = db.prepare('DELETE FROM user_egress_bindings WHERE user_id = ? AND kind = ?')
     this._countUsersByEgress = db.prepare(
-      'SELECT egress_id, COUNT(*) AS users FROM user_egress_bindings GROUP BY egress_id',
+      'SELECT egress_id, COUNT(*) AS users FROM user_egress_bindings WHERE kind = ? GROUP BY egress_id',
     )
 
     // ── buckets (022): the full set of egresses a user may use ──────────────
     this._listBuckets = db.prepare(
-      'SELECT * FROM user_egress_buckets WHERE user_id = ? ORDER BY is_primary DESC, egress_id',
+      'SELECT * FROM user_egress_buckets WHERE user_id = ? AND kind = ? ORDER BY is_primary DESC, egress_id',
     )
-    this._listAllBuckets = db.prepare('SELECT * FROM user_egress_buckets ORDER BY user_id, is_primary DESC, egress_id')
+    this._listAllBuckets = db.prepare(
+      'SELECT * FROM user_egress_buckets WHERE kind = ? ORDER BY user_id, is_primary DESC, egress_id',
+    )
     this._countBucketsByEgress = db.prepare(
-      'SELECT egress_id, COUNT(*) AS users FROM user_egress_buckets GROUP BY egress_id',
+      'SELECT egress_id, COUNT(*) AS users FROM user_egress_buckets WHERE kind = ? GROUP BY egress_id',
     )
     this._insertBucket = db.prepare(`
       INSERT OR IGNORE INTO user_egress_buckets
-        (user_id, egress_id, is_primary, reason, bound_by, bound_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (user_id, kind, egress_id, is_primary, reason, bound_by, bound_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    this._clearPrimary = db.prepare('UPDATE user_egress_buckets SET is_primary = 0 WHERE user_id = ?')
+    this._clearPrimary = db.prepare('UPDATE user_egress_buckets SET is_primary = 0 WHERE user_id = ? AND kind = ?')
     this._setPrimary = db.prepare(
-      'UPDATE user_egress_buckets SET is_primary = 1, updated_at = ? WHERE user_id = ? AND egress_id = ?',
+      'UPDATE user_egress_buckets SET is_primary = 1, updated_at = ? WHERE user_id = ? AND kind = ? AND egress_id = ?',
     )
-    this._deleteBucket = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ? AND egress_id = ?')
-    this._deleteAllBuckets = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ?')
+    this._deleteBucket = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ? AND kind = ? AND egress_id = ?')
+    this._deleteAllBuckets = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ? AND kind = ?')
     this._countByUser = db.prepare('SELECT user_id, COUNT(*) AS buckets FROM user_egress_buckets GROUP BY user_id')
 
-    this._getSlotBinding = db.prepare('SELECT * FROM user_slot_bindings WHERE user_id = ?')
-    this._listSlotBindings = db.prepare('SELECT * FROM user_slot_bindings ORDER BY user_id')
-    this._listSlotBindingsByEgress = db.prepare('SELECT * FROM user_slot_bindings WHERE egress_id = ? ORDER BY user_id')
+    this._getSlotBinding = db.prepare('SELECT * FROM user_slot_bindings WHERE user_id = ? AND kind = ?')
+    this._listSlotBindings = db.prepare('SELECT * FROM user_slot_bindings WHERE kind = ? ORDER BY user_id')
+    this._listSlotBindingsByEgress = db.prepare(
+      'SELECT * FROM user_slot_bindings WHERE egress_id = ? AND kind = ? ORDER BY user_id',
+    )
     this._listSlotBindingsBySlot = db.prepare('SELECT * FROM user_slot_bindings WHERE slot_id = ? ORDER BY user_id')
     this._insertSlotBinding = db.prepare(`
       INSERT OR IGNORE INTO user_slot_bindings (${SLOT_COLUMNS.join(', ')})
@@ -95,14 +100,14 @@ export class EgressBindingsRepo {
       UPDATE user_slot_bindings
          SET slot_id = ?, egress_id = ?, reason = ?, last_reason = ?,
              migrations = migrations + ?, bound_by = ?, updated_at = ?
-       WHERE user_id = ?
+       WHERE user_id = ? AND kind = ?
     `)
-    this._deleteSlotBinding = db.prepare('DELETE FROM user_slot_bindings WHERE user_id = ?')
+    this._deleteSlotBinding = db.prepare('DELETE FROM user_slot_bindings WHERE user_id = ? AND kind = ?')
     this._deleteSlotBindingsBySlot = db.prepare('DELETE FROM user_slot_bindings WHERE slot_id = ?')
 
     this._insertMigration = db.prepare(`
-      INSERT INTO egress_migrations (user_id, egress_id, from_slot, to_slot, reason, detail, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO egress_migrations (user_id, kind, egress_id, from_slot, to_slot, reason, detail, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     this._listMigrations = db.prepare('SELECT * FROM egress_migrations WHERE user_id = ? ORDER BY id DESC LIMIT ?')
     this._listRecentMigrations = db.prepare('SELECT * FROM egress_migrations ORDER BY id DESC LIMIT ?')
@@ -133,18 +138,18 @@ export class EgressBindingsRepo {
 
   // ── user → egress ─────────────────────────────────────────────────────────
 
-  getEgressBinding(userId) {
+  getEgressBinding(userId, kind = 'claude') {
     if (!userId) return null
-    return rowToEgressBinding(this._getEgressBinding.get(String(userId)))
+    return rowToEgressBinding(this._getEgressBinding.get(String(userId), String(kind)))
   }
 
-  listEgressBindings() {
-    return this._listEgressBindings.all().map(rowToEgressBinding)
+  listEgressBindings(kind = 'claude') {
+    return this._listEgressBindings.all(String(kind)).map(rowToEgressBinding)
   }
 
-  countUsersByEgress() {
+  countUsersByEgress(kind = 'claude') {
     const out = {}
-    for (const row of this._countUsersByEgress.all()) out[row.egress_id] = Number(row.users) || 0
+    for (const row of this._countUsersByEgress.all(String(kind))) out[row.egress_id] = Number(row.users) || 0
     return out
   }
 
@@ -156,37 +161,38 @@ export class EgressBindingsRepo {
    * migration and dashboard paths read, `user_egress_buckets` carries the full
    * set. They are always written together so they cannot disagree.
    */
-  upsertEgressBinding({ userId, egressId, reason = 'auto', boundBy = null } = {}) {
+  upsertEgressBinding({ userId, egressId, reason = 'auto', boundBy = null, kind = 'claude' } = {}) {
     const uid = String(userId || '').trim()
     const eid = String(egressId || '').trim()
+    const k = String(kind || 'claude')
     if (!uid || !eid) throw new Error('userId and egressId are required')
-    const existing = this.getEgressBinding(uid)
+    const existing = this.getEgressBinding(uid, k)
     const stamp = nowIso()
     let created = false
     if (!existing) {
-      this._insertEgressBinding.run(uid, eid, reason, boundBy, stamp, stamp)
+      this._insertEgressBinding.run(uid, k, eid, reason, boundBy, stamp, stamp)
       created = true
     } else if (existing.egress_id !== eid) {
-      this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid)
+      this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid, k)
     }
-    this.setPrimaryBucket({ userId: uid, egressId: eid, reason, boundBy })
-    const binding = this.getEgressBinding(uid)
+    this.setPrimaryBucket({ userId: uid, egressId: eid, reason, boundBy, kind: k })
+    const binding = this.getEgressBinding(uid, k)
     return { created, changed: created || existing?.egress_id !== eid, binding }
   }
 
   // ── buckets ───────────────────────────────────────────────────────────────
 
   /** Every egress this user may use, primary first. */
-  listBuckets(userId) {
+  listBuckets(userId, kind = 'claude') {
     if (!userId) return []
-    return this._listBuckets.all(String(userId)).map((row) => ({
+    return this._listBuckets.all(String(userId), String(kind)).map((row) => ({
       ...row,
       is_primary: Number(row.is_primary) === 1,
     }))
   }
 
-  listAllBuckets() {
-    return this._listAllBuckets.all().map((row) => ({ ...row, is_primary: Number(row.is_primary) === 1 }))
+  listAllBuckets(kind = 'claude') {
+    return this._listAllBuckets.all(String(kind)).map((row) => ({ ...row, is_primary: Number(row.is_primary) === 1 }))
   }
 
   /** How many buckets each user holds — 1 means a single stable IP. */
@@ -196,39 +202,41 @@ export class EgressBindingsRepo {
     return out
   }
 
-  countUsersByBucketEgress() {
+  countUsersByBucketEgress(kind = 'claude') {
     const out = {}
-    for (const row of this._countBucketsByEgress.all()) out[row.egress_id] = Number(row.users) || 0
+    for (const row of this._countBucketsByEgress.all(String(kind))) out[row.egress_id] = Number(row.users) || 0
     return out
   }
 
-  addBucket({ userId, egressId, isPrimary = false, reason = 'admin', boundBy = null } = {}) {
+  addBucket({ userId, egressId, isPrimary = false, reason = 'admin', boundBy = null, kind = 'claude' } = {}) {
     const uid = String(userId || '').trim()
     const eid = String(egressId || '').trim()
+    const k = String(kind || 'claude')
     if (!uid || !eid) throw new Error('userId and egressId are required')
     const stamp = nowIso()
     return withTransaction(this.db, () => {
-      const res = this._insertBucket.run(uid, eid, isPrimary ? 1 : 0, reason, boundBy, stamp, stamp)
+      const res = this._insertBucket.run(uid, k, eid, isPrimary ? 1 : 0, reason, boundBy, stamp, stamp)
       if (isPrimary) {
-        this._clearPrimary.run(uid)
-        this._setPrimary.run(stamp, uid, eid)
+        this._clearPrimary.run(uid, k)
+        this._setPrimary.run(stamp, uid, k, eid)
       }
-      return { added: res.changes > 0, buckets: this.listBuckets(uid) }
+      return { added: res.changes > 0, buckets: this.listBuckets(uid, k) }
     })
   }
 
   /** Promote a bucket to primary; the previous primary is demoted, not removed. */
-  setPrimaryBucket({ userId, egressId, reason = 'auto', boundBy = null } = {}) {
+  setPrimaryBucket({ userId, egressId, reason = 'auto', boundBy = null, kind = 'claude' } = {}) {
     const uid = String(userId || '').trim()
     const eid = String(egressId || '').trim()
+    const k = String(kind || 'claude')
     if (!uid || !eid) throw new Error('userId and egressId are required')
     const stamp = nowIso()
     return withTransaction(this.db, () => {
-      this._insertBucket.run(uid, eid, 0, reason, boundBy, stamp, stamp)
-      this._clearPrimary.run(uid)
-      this._setPrimary.run(stamp, uid, eid)
-      this._syncPrimaryMirror(uid, eid, reason, boundBy, stamp)
-      return this.listBuckets(uid)
+      this._insertBucket.run(uid, k, eid, 0, reason, boundBy, stamp, stamp)
+      this._clearPrimary.run(uid, k)
+      this._setPrimary.run(stamp, uid, k, eid)
+      this._syncPrimaryMirror(uid, eid, reason, boundBy, stamp, k)
+      return this.listBuckets(uid, k)
     })
   }
 
@@ -236,60 +244,62 @@ export class EgressBindingsRepo {
    * `user_egress_bindings` is the primary-only view other paths read; it must
    * never disagree with the bucket that is marked primary.
    */
-  _syncPrimaryMirror(uid, eid, reason, boundBy, stamp) {
-    const existing = this.getEgressBinding(uid)
+  _syncPrimaryMirror(uid, eid, reason, boundBy, stamp, kind = 'claude') {
+    const k = String(kind || 'claude')
+    const existing = this.getEgressBinding(uid, k)
     if (!existing) {
-      this._insertEgressBinding.run(uid, eid, reason, boundBy, stamp, stamp)
+      this._insertEgressBinding.run(uid, k, eid, reason, boundBy, stamp, stamp)
       return
     }
     if (existing.egress_id !== eid) {
-      this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid)
+      this._updateEgressBinding.run(eid, reason, boundBy, stamp, stamp, uid, k)
     }
   }
 
-  removeBucket({ userId, egressId } = {}) {
+  removeBucket({ userId, egressId, kind = 'claude' } = {}) {
     const uid = String(userId || '').trim()
     const eid = String(egressId || '').trim()
+    const k = String(kind || 'claude')
     if (!uid || !eid) throw new Error('userId and egressId are required')
     return withTransaction(this.db, () => {
-      const before = this.listBuckets(uid)
+      const before = this.listBuckets(uid, k)
       const wasPrimary = before.some((b) => b.egress_id === eid && b.is_primary)
-      this._deleteBucket.run(uid, eid)
-      const after = this.listBuckets(uid)
+      this._deleteBucket.run(uid, k, eid)
+      const after = this.listBuckets(uid, k)
       if (wasPrimary) {
         // Never leave a user with buckets but no primary: promote the first and
         // keep the primary-only mirror in step with it.
         const next = after[0]
         if (next) {
-          this._setPrimary.run(nowIso(), uid, next.egress_id)
-          this._syncPrimaryMirror(uid, next.egress_id, 'auto', null, nowIso())
+          this._setPrimary.run(nowIso(), uid, k, next.egress_id)
+          this._syncPrimaryMirror(uid, next.egress_id, 'auto', null, nowIso(), k)
         } else {
-          this._deleteEgressBinding.run(uid)
+          this._deleteEgressBinding.run(uid, k)
         }
       }
-      return { removed: before.length !== after.length, buckets: this.listBuckets(uid) }
+      return { removed: before.length !== after.length, buckets: this.listBuckets(uid, k) }
     })
   }
 
-  deleteEgressBinding(userId) {
+  deleteEgressBinding(userId, kind = 'claude') {
     if (!userId) return { changes: 0 }
-    return this._deleteEgressBinding.run(String(userId))
+    return this._deleteEgressBinding.run(String(userId), String(kind || 'claude'))
   }
 
   // ── user → slot ───────────────────────────────────────────────────────────
 
-  getSlotBinding(userId) {
+  getSlotBinding(userId, kind = 'claude') {
     if (!userId) return null
-    return rowToSlotBinding(this._getSlotBinding.get(String(userId)))
+    return rowToSlotBinding(this._getSlotBinding.get(String(userId), String(kind)))
   }
 
-  listSlotBindings() {
-    return this._listSlotBindings.all().map(rowToSlotBinding)
+  listSlotBindings(kind = 'claude') {
+    return this._listSlotBindings.all(String(kind)).map(rowToSlotBinding)
   }
 
-  listSlotBindingsByEgress(egressId) {
+  listSlotBindingsByEgress(egressId, kind = 'claude') {
     if (!egressId) return []
-    return this._listSlotBindingsByEgress.all(String(egressId)).map(rowToSlotBinding)
+    return this._listSlotBindingsByEgress.all(String(egressId), String(kind)).map(rowToSlotBinding)
   }
 
   listSlotBindingsBySlot(slotId) {
@@ -301,28 +311,37 @@ export class EgressBindingsRepo {
    * @param {boolean} migrate  true when the user is moving to a different slot
    *                           (increments the counter and records last_reason)
    */
-  upsertSlotBinding({ userId, slotId, egressId, reason = 'auto', boundBy = null, migrate = false } = {}) {
+  upsertSlotBinding({
+    userId,
+    slotId,
+    egressId,
+    reason = 'auto',
+    boundBy = null,
+    migrate = false,
+    kind = 'claude',
+  } = {}) {
     const uid = String(userId || '').trim()
     const sid = String(slotId || '').trim()
     const eid = String(egressId || '').trim()
+    const k = String(kind || 'claude')
     if (!uid || !sid || !eid) throw new Error('userId, slotId and egressId are required')
     const stamp = nowIso()
-    const existing = this.getSlotBinding(uid)
+    const existing = this.getSlotBinding(uid, k)
     if (!existing) {
-      this._insertSlotBinding.run(uid, sid, eid, reason, 0, null, boundBy, stamp, stamp)
-      return { created: true, moved: false, binding: this.getSlotBinding(uid) }
+      this._insertSlotBinding.run(uid, k, sid, eid, reason, 0, null, boundBy, stamp, stamp)
+      return { created: true, moved: false, binding: this.getSlotBinding(uid, k) }
     }
     if (existing.slot_id === sid && existing.egress_id === eid) {
       return { created: false, moved: false, binding: existing }
     }
     const bumped = migrate || existing.slot_id !== sid ? 1 : 0
-    this._updateSlotBinding.run(sid, eid, reason, reason, bumped, boundBy, stamp, uid)
-    return { created: false, moved: true, binding: this.getSlotBinding(uid) }
+    this._updateSlotBinding.run(sid, eid, reason, reason, bumped, boundBy, stamp, uid, k)
+    return { created: false, moved: true, binding: this.getSlotBinding(uid, k) }
   }
 
-  deleteSlotBinding(userId) {
+  deleteSlotBinding(userId, kind = 'claude') {
     if (!userId) return { changes: 0 }
-    return this._deleteSlotBinding.run(String(userId))
+    return this._deleteSlotBinding.run(String(userId), String(kind || 'claude'))
   }
 
   /** A slot that lost its credential releases every user pinned to it. */
@@ -333,10 +352,11 @@ export class EgressBindingsRepo {
 
   // ── audit ─────────────────────────────────────────────────────────────────
 
-  recordMigration({ userId, egressId, fromSlot = null, toSlot = null, reason, detail = null } = {}) {
+  recordMigration({ userId, egressId, fromSlot = null, toSlot = null, reason, detail = null, kind = 'claude' } = {}) {
     if (!userId || !egressId || !reason) throw new Error('userId, egressId and reason are required')
     return this._insertMigration.run(
       String(userId),
+      String(kind || 'claude'),
       String(egressId),
       fromSlot == null ? null : String(fromSlot),
       toSlot == null ? null : String(toSlot),
@@ -353,7 +373,7 @@ export class EgressBindingsRepo {
   }
 
   /** Atomically move a user to another slot inside the same egress. */
-  moveUserToSlot({ userId, egressId, fromSlot, toSlot, reason = 'migrate', boundBy = null } = {}) {
+  moveUserToSlot({ userId, egressId, fromSlot, toSlot, reason = 'migrate', boundBy = null, kind = 'claude' } = {}) {
     return withTransaction(this.db, () => {
       const res = this.upsertSlotBinding({
         userId,
@@ -362,8 +382,9 @@ export class EgressBindingsRepo {
         reason,
         boundBy,
         migrate: true,
+        kind,
       })
-      this.recordMigration({ userId, egressId, fromSlot, toSlot, reason })
+      this.recordMigration({ userId, egressId, fromSlot, toSlot, reason, kind })
       return res
     })
   }

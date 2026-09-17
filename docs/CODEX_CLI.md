@@ -101,10 +101,35 @@ CLI 的 JSONL → Responses SSE 都在 `codex-cli-client.mjs`：
 `codexDoctorStatus()` 跑 `codex doctor --json`（版本 / auth / 配置 / 网络，23 项检查），
 可用于槽健康检查与"这个槽到底能不能用"的排查。
 
+## 槽选择（复用 egress 那套）
+
+`pickCodexVm()` 不再是"列表里第一个 codex 槽"：
+
+- **master pin**（`x-kin-vm`）→ 用指定槽，pin 到 Claude 槽报 `platform_mismatch`；
+- **有用户身份**（API key 带 user_id）→ `resolveUserDispatch(kind:'codex')`：
+  用户绑定 → 桶 → 负载 → 迁移，和 Claude 侧同一套代码；
+- **平台级调用** → 全池最空的 codex 槽（按挂人少的 egress 排）；
+- 一律**不允许回退到本机共享 IP**（`allowDirect: false`）—— 真 CLI 从宿主机直连
+  等于换掉槽的身份；
+- 绑定层的错误**不让请求失败**：降到"全池挑一个能用的 codex 槽"，并把失败原因留在
+  日志里（和 Claude 侧对 `userBinding` 的态度一致）。
+
+### 绑定按凭证类型分开（028 迁移）
+
+一个用户可能同时用 Claude 和 Codex，而槽的 IP 是槽自己带来的。如果两种凭证共用一行
+绑定：用户原本的 Claude 出口在 IP-A，第一次走 Codex（槽在 IP-B）时迁移链会把 primary
+改写成 IP-B —— **他的 Claude 出口跟着变了**。所以 028 把
+`user_egress_bindings` / `user_egress_buckets` / `user_slot_bindings` 重建为
+`(user_id, kind)` 主键，`egress_migrations` 加 `kind` 列，默认值 `'claude'` 让既有数据
+与既有代码路径行为完全不变。Repo 的每个方法都多一个 `kind = 'claude'` 参数。
+
+槽侧闸门也跟着按类型分派：`evaluateSlotGate(vm, { requireKind })` —— Claude 池要
+claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽返回 `claude_vm`），
+默认不传保持原行为。
+
 ## 尚未做（下一步）
 
 1. 槽内容器化：现在 CLI 跑在宿主（一槽一份 CODEX_HOME），下一步把它放进槽容器，
    拿到机器级指纹隔离；
-2. 槽选择接进用户绑定 / 桶 / 负载（现在仍是"第一个 codex 槽"）；
-3. 常驻 `codex app-server`（省掉每请求冷启动）；
-4. codex 配额闸门（`GetAccountRateLimits`）与计费。
+2. 常驻 `codex app-server`（省掉每请求冷启动）；
+3. codex 配额闸门（`GetAccountRateLimits`）与计费。

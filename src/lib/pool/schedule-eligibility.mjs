@@ -78,8 +78,33 @@ export function slotHasBoundProxy(vm) {
   return !!(vm?.proxy_cli_enabled && (vm?.proxy?.url || (vm?.proxy?.host && vm?.proxy?.port)))
 }
 
-export function evaluateSlotGate(vm) {
-  if (isCodexVm(vm)) return { ok: false, reason: 'codex_vm' }
+/**
+ * 槽能不能服务。
+ *
+ * `requireKind` 让"按凭证类型分派"成为参数而不是硬编码：Claude 池要 claude 槽，
+ * Codex 池要 codex 槽，两边都不许串。默认（不传）保持原行为 —— 只为 Claude 服务，
+ * codex 槽返回 `codex_vm`，这样既有的调度路径一行不用改。
+ *
+ * `hasCodexCredential` 由调用方注入（读凭证要碰文件系统），缺省时按 vm 上的投影判断。
+ */
+export function evaluateSlotGate(vm, { requireKind = null, hasCodexCredential = null } = {}) {
+  const codex = isCodexVm(vm)
+  if (requireKind === 'claude' && codex) return { ok: false, reason: 'codex_vm' }
+  if (requireKind === 'codex' && !codex) return { ok: false, reason: 'claude_vm' }
+  if (!requireKind && codex) return { ok: false, reason: 'codex_vm' }
+
+  if (codex) {
+    // codex 槽的凭证不在 vm 上，而在 vms/<id>/codex-credentials.json 里，所以静态门只问
+    // "能不能调度"与"有没有出口"，凭证由调用方注入判定（读文件的事不放进这个纯模块）。
+    if (!isVmScheduleReady(vm, { allowMissingCredential: true })) return { ok: false, reason: 'vm_unschedulable' }
+    if (!slotHasBoundProxy(vm)) return { ok: false, reason: 'proxy_required' }
+    const hasToken =
+      typeof hasCodexCredential === 'function'
+        ? !!hasCodexCredential(vm)
+        : !!(vm?.codex?.has_access || vm?.codex?.has_refresh || vm?.codex?.has_token)
+    return hasToken ? { ok: true } : { ok: false, reason: 'no_codex_credential' }
+  }
+
   const oauthProjection = /^oauth_/.test(String(vm?.schedule_disabled_reason || ''))
   if (!isVmScheduleReady(vm, { allowMissingCredential: oauthProjection })) {
     if (!oauthProjection) return { ok: false, reason: 'vm_unschedulable' }

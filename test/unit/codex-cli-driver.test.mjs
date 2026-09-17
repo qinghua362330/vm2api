@@ -430,7 +430,155 @@ test('没绑代理的 codex 槽在 CLI 形态下被拒绝，不会从宿主机 I
       ops: { streamCodexCli: () => assert.fail('must not reach the CLI without a proxy') },
     })
     assert.equal(response.status, 503)
-    assert.equal(response.body.error.code, 'proxy_required')
+    assert.equal(response.body.error.code, 'no_codex_slot')
+    assert.match(response.body.error.message, /proxy_required/, '闸门原因要原样带出来')
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+// ── 槽选择：复用用户绑定 / 桶 / 负载，且不污染 Claude 的出口 ─────────────────
+
+function codexFleet(project) {
+  // 一个 Claude 槽（IP-A）+ 两个 codex 槽（IP-B / IP-C），和真实 fleet 同形状。
+  const write = (id, patch) => {
+    fs.mkdirSync(path.join(project, 'vms', id), { recursive: true })
+    fs.writeFileSync(
+      path.join(project, 'vms', `${id}.json`),
+      JSON.stringify({ id, status: 'running', schedulable: true, proxy_cli_enabled: true, ...patch }),
+    )
+  }
+  write('vm-claude', {
+    proxy: { id: 'proxy-a', url: 'socks5h://127.0.0.1:1081' },
+    claude: {
+      account_uuid: 'acct-claude',
+      access_token: 'at',
+      refresh_token: 'rt',
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    },
+  })
+  write('vm-codex-1', {
+    platform: 'openai',
+    family: 'codex',
+    codex_kernel: true,
+    proxy: { id: 'proxy-b', url: 'socks5h://127.0.0.1:1082' },
+  })
+  write('vm-codex-2', {
+    platform: 'openai',
+    family: 'codex',
+    codex_kernel: true,
+    proxy: { id: 'proxy-c', url: 'socks5h://127.0.0.1:1083' },
+  })
+  fs.writeFileSync(path.join(project, 'vms', 'active.json'), JSON.stringify({ active_vm: 'vm-claude' }))
+  const creds = (id) =>
+    fs.writeFileSync(
+      path.join(project, 'vms', id, 'codex-credentials.json'),
+      JSON.stringify({
+        accounts: [{ id: `${id}-a`, access_token: 'at', refresh_token: 'rt', chatgpt_account_id: `acc-${id}` }],
+      }),
+    )
+  creds('vm-codex-1')
+  creds('vm-codex-2')
+}
+
+test('codex 槽选择走用户绑定与桶，且不动同一个用户的 Claude 出口', async () => {
+  const { pickCodexVm } = await import('../../src/lib/protocol/handle-codex.mjs')
+  const { EgressBindingsRepo } = await import('../../src/lib/db/repos/egress-bindings-repo.mjs')
+  const { closeDatabase, getDb, openDatabase } = await import('../../src/lib/db/database.mjs')
+  const project = tmp()
+  const prev = process.env.KIN_DB_PATH
+  process.env.KIN_DB_PATH = path.join(project, 'kin.db')
+  try {
+    codexFleet(project)
+    openDatabase()
+    const repo = new EgressBindingsRepo(getDb())
+    // 这个用户本来就有 Claude 出口：IP-A 上的 claude 槽。
+    repo.upsertEgressBinding({ userId: 'u1', egressId: 'proxy-a', kind: 'claude' })
+    repo.upsertSlotBinding({ userId: 'u1', slotId: 'vm-claude', egressId: 'proxy-a', kind: 'claude' })
+
+    const req = { headers: {}, apiKeyKind: 'key', apiKeyRecord: { user_id: 'u1' } }
+    const picked = pickCodexVm(project, req)
+    assert.ok(picked.vm, JSON.stringify(picked))
+    assert.equal(isCodex(picked.vm), true, '必须挑 codex 槽')
+    assert.equal(picked.userId, 'u1')
+    assert.match(picked.egressId, /^proxy-[bc]$/)
+
+    // Claude 那一套完全没动 —— 这是 kind 隔离的意义
+    const claudeEgress = repo.getEgressBinding('u1')
+    assert.equal(claudeEgress.egress_id, 'proxy-a', 'codex 的落点不能改写 Claude 的出口')
+    assert.equal(repo.getSlotBinding('u1').slot_id, 'vm-claude')
+    assert.deepEqual(
+      repo.listBuckets('u1').map((bucket) => bucket.egress_id),
+      ['proxy-a'],
+      'codex 的桶不能混进 Claude 的桶集合',
+    )
+    // codex 自己那一套落了盘：一条绑定 + 一个槽 + 一个桶
+    const codexEgress = repo.getEgressBinding('u1', 'codex')
+    assert.ok(codexEgress?.egress_id, 'codex 也要有自己的绑定')
+    assert.equal(repo.getSlotBinding('u1', 'codex').egress_id, codexEgress.egress_id)
+    assert.deepEqual(
+      repo.listBuckets('u1', 'codex').map((bucket) => bucket.egress_id),
+      [codexEgress.egress_id],
+    )
+
+    // 第二次请求走快路径，落点稳定
+    const again = pickCodexVm(project, req)
+    assert.equal(again.vm.id, picked.vm.id, '同一个用户的 codex 落点要稳定')
+  } finally {
+    closeDatabase()
+    if (prev === undefined) delete process.env.KIN_DB_PATH
+    else process.env.KIN_DB_PATH = prev
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+function isCodex(vm) {
+  return vm?.platform === 'openai' || vm?.codex_kernel === true
+}
+
+test('平台级调用（没有用户）挑最空的 codex 槽，且绝不挑 Claude 槽', async () => {
+  const { pickCodexVm } = await import('../../src/lib/protocol/handle-codex.mjs')
+  const project = tmp()
+  try {
+    codexFleet(project)
+    // codex-1 上挂两个人，codex-2 没人 → 应挑 codex-2
+    const { closeDatabase, getDb, openDatabase } = await import('../../src/lib/db/database.mjs')
+    const prev = process.env.KIN_DB_PATH
+    process.env.KIN_DB_PATH = path.join(project, 'kin.db')
+    openDatabase()
+    const { EgressBindingsRepo } = await import('../../src/lib/db/repos/egress-bindings-repo.mjs')
+    const repo = new EgressBindingsRepo(getDb())
+    repo.upsertSlotBinding({ userId: 'x1', slotId: 'vm-codex-1', egressId: 'proxy-b', kind: 'codex' })
+    repo.upsertSlotBinding({ userId: 'x2', slotId: 'vm-codex-1', egressId: 'proxy-b', kind: 'codex' })
+
+    const picked = pickCodexVm(project, { headers: {}, apiKeyKind: 'master' })
+    assert.equal(picked.vm.id, 'vm-codex-2', JSON.stringify(picked))
+    assert.equal(picked.scope, 'platform')
+
+    // master 可以 pin，但 pin 到 Claude 槽必须被拒
+    const mismatch = pickCodexVm(project, { headers: { 'x-kin-vm': 'vm-claude' }, apiKeyKind: 'master' })
+    assert.equal(mismatch.error, 'platform_mismatch')
+
+    closeDatabase()
+    if (prev === undefined) delete process.env.KIN_DB_PATH
+    else process.env.KIN_DB_PATH = prev
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('没有凭证的 codex 槽不参与选择', async () => {
+  const { pickCodexVm } = await import('../../src/lib/protocol/handle-codex.mjs')
+  const project = tmp()
+  try {
+    codexFleet(project)
+    // 把两个 codex 槽的凭证都清掉
+    for (const id of ['vm-codex-1', 'vm-codex-2']) {
+      fs.writeFileSync(path.join(project, 'vms', id, 'codex-credentials.json'), JSON.stringify({ accounts: [] }))
+    }
+    const picked = pickCodexVm(project, { headers: {}, apiKeyKind: 'master' })
+    assert.equal(picked.error, 'no_codex_slot', JSON.stringify(picked))
+    assert.equal(picked.reason, 'no_codex_credential', '没凭证要说清楚是没凭证')
   } finally {
     fs.rmSync(project, { recursive: true, force: true })
   }

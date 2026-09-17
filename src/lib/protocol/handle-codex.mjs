@@ -12,6 +12,8 @@ import { codexBinPath, streamCodexCli } from '../transport/codex-cli-client.mjs'
 import { materializeCodexHome } from '../vm/codex-home.mjs'
 import { readCodexAccounts } from '../vm/codex-slot.mjs'
 import { boundProxyUrl } from '../vm/egress.mjs'
+import { pickLeastLoadedEgress, resolveUserDispatch, slotVerdict } from '../pool/egress-binding.mjs'
+import { ownerScopeFromRequest } from '../admin/resource-owner.mjs'
 import fs from 'node:fs'
 
 function sessionFrom(req, body) {
@@ -34,17 +36,124 @@ function pinnedVmId(req) {
   return /^vm-[a-z0-9-]+$/i.test(pinVmRaw) ? pinVmRaw : null
 }
 
-function pickCodexVm(projectRoot, req) {
+/**
+ * 选一个 codex 槽。
+ *
+ * 以前这里是"列表里第一个 codex 槽"—— 一个槽挂了就全挂，也没有"用户落在哪个槽"的
+ * 概念。现在复用 egress 那套：用户绑定 → 桶 → 负载，只是把凭证类型换成 codex。
+ *
+ * 两条硬规则：
+ *   1. 只挑 codex 槽（闸门按 kind 分派），Claude 池与 Codex 池互不越界；
+ *   2. 不允许回退到本机共享 IP —— 真 CLI 从宿主机直连等于换掉槽的身份。
+ *
+ * 绑定按 kind 存（028 迁移），所以 codex 的落点不会污染同一个用户的 Claude 出口。
+ */
+export function pickCodexVm(projectRoot, req, { gates = {}, ownerScope = null, vms = null } = {}) {
   const pin = pinnedVmId(req)
   if (pin) {
     const vm = getVm(projectRoot, pin)
     if (!vm || !isCodexVm(vm)) return { error: 'platform_mismatch', pin }
-    return { vm }
+    return { vm, scope: 'pin' }
   }
-  const summary = listVms(projectRoot).find((item) => isCodexVm(item))
-  const vm = summary?.id ? getVm(projectRoot, summary.id) : null
-  if (!vm || !isCodexVm(vm)) return { error: 'no_codex_vm' }
-  return { vm }
+
+  const all = Array.isArray(vms)
+    ? vms
+    : listVms(projectRoot)
+        .map((summary) => getVm(projectRoot, summary.id))
+        .filter(Boolean)
+  const codexVms = all.filter((vm) => isCodexVm(vm))
+  if (!codexVms.length) return { error: 'no_codex_vm' }
+
+  const hasCodexCredential = (vm) => readCodexAccounts(projectRoot, vm.id).some((account) => account?.access_token)
+  const scope = ownerScope || ownerScopeFromRequest(req, null)
+  const userId = scope?.type === 'user' ? String(scope.userId || '').trim() : ''
+
+  // 绑定层的问题（数据库没打开、绑定表坏了）不能把这一跳打死 —— Claude 侧对
+  // userBinding 也是这个态度：降级到"全池挑一个能用的槽"，而不是让请求失败。
+  const degraded = (error) => {
+    const vm = firstUsableCodexSlot(codexVms, { gates, hasCodexCredential })
+    if (!vm) {
+      return {
+        error: 'no_codex_slot',
+        reason: codexSlotRejection(codexVms, { gates, hasCodexCredential }),
+        // 绑定层为什么不可用也留下来，方便排查（不覆盖闸门原因）。
+        binding_error: String(error?.message || error),
+      }
+    }
+    return { vm, scope: 'degraded', binding_error: String(error?.message || error) }
+  }
+
+  if (!userId) {
+    // 平台级调用（master key 且没 pin）：全池最空的 codex 槽。
+    try {
+      const picked = pickLeastLoadedEgress({ vms: codexVms, gates, kind: 'codex', hasCodexCredential })
+      if (!picked.ok) {
+        return { error: 'no_codex_slot', reason: codexSlotRejection(codexVms, { gates, hasCodexCredential }) }
+      }
+      return { vm: picked.slot.vm, egressId: picked.egressId, scope: 'platform' }
+    } catch (error) {
+      return degraded(error)
+    }
+  }
+
+  let resolved = null
+  try {
+    resolved = resolveUserDispatch(
+      {
+        userId,
+        vms: codexVms,
+        loadVm: (id) => getVm(projectRoot, id),
+        gates,
+        kind: 'codex',
+        hasCodexCredential,
+        allowFailover: true,
+        allowDirect: false,
+        reason: 'credential_dead',
+      },
+      {},
+    )
+  } catch (error) {
+    return degraded(error)
+  }
+  if (!resolved.ok) {
+    return {
+      error: 'no_codex_slot',
+      reason:
+        resolved.reason === 'no_slot_in_egress' || resolved.reason === 'no_egress_with_capacity'
+          ? codexSlotRejection(codexVms, { gates, hasCodexCredential })
+          : resolved.reason,
+      transient: resolved.transient === true,
+      userId,
+      egressId: resolved.egressId || null,
+    }
+  }
+  return {
+    vm: resolved.vm,
+    egressId: resolved.egressId,
+    slotId: resolved.slotId,
+    userId,
+    scope: resolved.migrated ? 'user-migrated' : resolved.created || resolved.assigned ? 'user-assigned' : 'user',
+  }
+}
+
+/** 不碰数据库的最小挑选：绑定层不可用时的兜底。 */
+export function firstUsableCodexSlot(codexVms = [], { gates = {}, hasCodexCredential = null } = {}) {
+  return (
+    [...codexVms]
+      .filter((vm) => slotVerdict(vm, gates, { kind: 'codex', hasCodexCredential }).ok)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))[0] || null
+  )
+}
+
+/** 兜底挑选失败时，把最相关的闸门原因报出来（没有槽 = no_codex_vm）。 */
+export function codexSlotRejection(codexVms = [], { gates = {}, hasCodexCredential = null } = {}) {
+  if (!codexVms.length) return 'no_codex_vm'
+  const reasons = codexVms.map((vm) => slotVerdict(vm, gates, { kind: 'codex', hasCodexCredential }).reason)
+  // 优先级：出口 > 凭证 > 其它。"槽还在跑但没绑代理"比"没凭证"更值得先说。
+  for (const wanted of ['proxy_required', 'no_codex_credential', 'vm_unschedulable']) {
+    if (reasons.includes(wanted)) return wanted
+  }
+  return reasons.find(Boolean) || 'no_codex_slot'
 }
 
 function execFor(projectRoot, vm) {
@@ -187,11 +296,19 @@ export async function handleCodexProtocol({
   }
   const vm = picked.vm
   if (!vm) {
+    // 分清"一个 codex 槽都没有"和"有槽但都不能用"：后者要把闸门的原因原样带出去
+    // （proxy_required / no_codex_credential …），否则运维只能靠猜。
+    const noneAtAll = picked.error === 'no_codex_vm'
     stats.errors++
     logBag.via = 'codex-kernel'
-    logBag.error_code = 'no_codex_vm'
+    logBag.error_code = noneAtAll ? 'no_codex_vm' : 'no_codex_slot'
+    if (picked.reason) logBag.codex_slot_reason = picked.reason
     return json(res, 503, {
-      error: { type: 'api_error', code: 'no_codex_vm', message: 'no Codex kernel VM is configured' },
+      error: {
+        type: 'api_error',
+        code: logBag.error_code,
+        message: noneAtAll ? 'no Codex slot is configured' : `no usable Codex slot (${picked.reason || 'unknown'})`,
+      },
     })
   }
   const proxyUrl = boundProxyUrl(vm.proxy)
