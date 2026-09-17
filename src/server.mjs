@@ -63,7 +63,7 @@ import { listVms, getVm, getActiveVmId, setVmSchedulable } from './lib/vm/vm-reg
 import { makeError, ErrorType, ErrorCode } from './lib/core/errors.mjs'
 import * as panel from './lib/admin/panel-api.mjs'
 import { ProxyPool } from './lib/vm/proxy-pool.mjs'
-import { egressListening, ensureProxyEgress } from './lib/vm/egress.mjs'
+import { egressListening, ensureProxyEgress, reconcileSlotEgress } from './lib/vm/egress.mjs'
 import { GATEWAY_CAPABILITIES } from './lib/vm/execution-context.mjs'
 import { isTelemetryPath, telemetryInterceptResponse } from './lib/identity/telemetry-rewrite.mjs'
 import { openDatabase, closeDatabase } from './lib/db/database.mjs'
@@ -1185,6 +1185,23 @@ server.listen(cfg.port, cfg.host, () => {
   } catch (e) {
     console.warn('[kernel-watchdog] start failed', e?.message || e)
   }
+  // 控制面重启会带走 kin-egress（它是本进程的 detached 子进程），而槽容器照旧在跑：
+  // 不补这一步，线上所有槽的出口会在没人察觉的情况下变成"没人监听的端口"。
+  // 异步做，不拖慢启动；失败只记日志。
+  void Promise.resolve()
+    .then(() => reconcileSlotEgress(cfg.paths.project, listVms(cfg.paths.project)))
+    .then((rows) => {
+      if (!rows.length) return
+      console.log(
+        JSON.stringify({
+          event: 'egress-reconcile',
+          slots: rows.length,
+          failed: rows.filter((r) => !r.ok).length,
+          rows,
+        }),
+      )
+    })
+    .catch((e) => console.warn('[egress-reconcile] failed', e?.message || e))
 
   try {
     usageProbeMonitor?.start?.({ immediate: true })

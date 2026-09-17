@@ -202,6 +202,19 @@ function removeIptables(plan, runIptables = iptables) {
   return { ok: true }
 }
 
+/** 这个 pid 到底是不是 kin-egress（防容器重启后的 pid 复用）。 */
+function pidLooksLikeEgress(pid) {
+  const n = Number(pid)
+  if (!Number.isFinite(n) || n <= 0) return false
+  try {
+    const cmdline = fs.readFileSync(`/proc/${n}/cmdline`, 'utf8')
+    return /kin-egress/.test(cmdline)
+  } catch {
+    // 读不到 /proc（非 Linux 或权限不足）时退回"活着就算"，保持老行为
+    return true
+  }
+}
+
 export function startEgressProcess({ projectRoot, proxyId, proxyUrl, tcpPort, dnsPort, listenHost, bin = EGRESS_BIN }) {
   if (!listenHost) return { ok: false, error: 'egress listen host required' }
   const dir = egressRunDir(projectRoot, proxyId)
@@ -211,7 +224,9 @@ export function startEgressProcess({ projectRoot, proxyId, proxyUrl, tcpPort, dn
   const listenTcp = `${listenHost}:${tcpPort}`
   const listenDns = `${listenHost}:${dnsPort}`
   const existing = readPid(pidFile)
-  if (existing && pidAlive(existing)) {
+  // 光看"pid 活着"不够：控制面容器重启后 pid 命名空间重来一遍，旧 pid 很容易被别的
+  // 进程顶上，那时复用等于把一个不会监听的进程当成网关（随后 waitListen 超时）。
+  if (existing && pidAlive(existing) && pidLooksLikeEgress(existing)) {
     try {
       const old = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
       if (old.listen_tcp === listenTcp && old.listen_dns === listenDns && old.proxy_url === proxyUrl) {
@@ -279,6 +294,40 @@ export function egressListening(projectRoot, proxyId, timeoutMs = 400) {
   if (!host || !Number.isFinite(port) || port <= 0) return { ok: false, pid: st.pid, reason: 'bad_listen' }
   if (!waitListen(host, port, timeoutMs)) return { ok: false, pid: st.pid, reason: 'not_listening' }
   return st
+}
+
+/**
+ * 开机对账：把"还该在听"的透明出口网关重新拉起来。
+ *
+ * 为什么必须有：`kin-egress` 是控制面容器里的一个 detached 子进程（见
+ * `startEgressProcess`），控制面一重启它就随命名空间一起没了 —— 而槽容器是
+ * `--restart unless-stopped` 的，它照旧在跑。于是出现最难受的状态：槽在跑、
+ * 面板显示健康，但槽里所有出站都被 iptables 重定向到一个没人监听的端口，
+ * 表现为 DNS/连接超时（codex CLI 会一直重连到超时）。重启控制面本来是运维动作，
+ * 不该把线上所有槽的出口悄悄打断。
+ *
+ * 只对"槽在跑 + 绑了代理"的槽做，且 ensureProxyEgress 本身幂等（配置一致就复用）。
+ */
+export function reconcileSlotEgress(projectRoot, vms = [], { ensure = ensureProxyEgress } = {}) {
+  const results = []
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    if (!vm?.id) continue
+    if (String(vm.status || '').toLowerCase() !== 'running') continue
+    if (!vm.proxy?.id) continue
+    try {
+      const r = ensure(projectRoot, vm.proxy)
+      results.push({
+        vm_id: vm.id,
+        ok: !!r?.ok,
+        reused: !!r?.reused,
+        network: r?.network || null,
+        error: r?.error || null,
+      })
+    } catch (error) {
+      results.push({ vm_id: vm.id, ok: false, error: String(error?.message || error) })
+    }
+  }
+  return results
 }
 
 export function boundProxyUrl(proxy) {
