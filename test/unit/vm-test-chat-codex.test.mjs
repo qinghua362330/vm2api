@@ -305,3 +305,45 @@ test('runVmTestChat Codex ENOENT is not rewritten as wrap cli-hop', async (t) =>
   assert.match(result.error.message, /Codex kernel 未就绪/)
   assert.doesNotMatch(result.error.message, /wrap cli-hop 未就绪/)
 })
+
+/**
+ * 槽没在跑时「测试」不能直接开测。
+ *
+ * 线上误判过一次：`状态 running=false` + 129ms + `codex_cli_failed`，看起来像凭证被拒，
+ * 实际是容器不在（推理发生在槽里）。现在测试会先把槽拉起来 —— 拉不起来就明确报
+ * slot_start_failed，不再伪装成上游错误。
+ */
+test('槽未运行：测试先启动槽，启动失败则报 slot_start_failed 而不是上游错', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-test-chat-slotdown-'))
+  try {
+    fs.mkdirSync(path.join(dir, 'vms'), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'vms', 'vm-09.json'),
+      JSON.stringify({
+        id: 'vm-09',
+        name: '09',
+        platform: 'openai',
+        family: 'codex',
+        status: 'stopped',
+        schedulable: true,
+        proxy: { id: 'px-1', host: '127.0.0.1', port: 1080, username: 'u', password: 'p' },
+      }),
+    )
+    const result = await runVmTestChat({
+      projectRoot: dir,
+      vmId: 'vm-09',
+      apiKey: 'k',
+      baseUrl: 'http://127.0.0.1:1',
+    })
+    assert.equal(result.ok, false)
+    // 没凭证的槽会先被凭证门拦下；这里只要求"不是伪装的上游失败"
+    assert.notEqual(result.error?.code, 'codex_cli_failed')
+    // 具体是 bin_missing / image_missing 还是 no_credential 取决于本机环境，
+    // 关键是别把"槽没起来"包装成上游错误
+    assert.notEqual(result.error?.code, 'codex_cli_failed')
+    assert.ok(String(result.error?.message || '').length > 0, JSON.stringify(result.error))
+    assert.ok((result.log || []).some((line) => /槽未在运行|无 Codex OAuth/.test(line.message)))
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

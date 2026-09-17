@@ -15,6 +15,7 @@ import { Readable } from 'node:stream'
 import path from 'node:path'
 import { getVm, vmHasClaudeCredential } from '../vm/vm-registry.mjs'
 import { isCodexVm } from '../vm/vm-kind.mjs'
+import { startSlotReady } from '../vm/slot-runtime.mjs'
 import { summarizeCodexSlot, readCodexAccounts, upsertCodexAccount } from '../vm/codex-slot.mjs'
 import { boundProxyUrl } from '../vm/egress.mjs'
 import { loadVmIdentity } from '../identity/vm-identity.mjs'
@@ -783,6 +784,46 @@ export async function runVmTestChat(opts = {}) {
   push('info', `开始测试凭证槽 ${vm.name || vmId}`)
   push('info', `状态 running=${vm.status === 'running'} schedulable=${vm.schedulable !== false}`)
   const routing = loadRouting(projectRoot)
+  // 槽没在跑就别"测"了：这条链路的推理发生在槽里（Claude 是 worker，codex 是容器内的
+  // codex CLI），容器不在等于必然失败，而失败信息还会长得像凭证问题（线上就是这么
+  // 误判的：running=false + 129ms + codex_cli_failed）。这里顺手把槽拉起来 —— 和面板
+  // 「启动」同一个入口 startSlotReady，并把这件事写进日志。
+  if (process.env.KIN_CRS_MOCK !== '1' && vm.status !== 'running') {
+    push('info', '槽未在运行 → 先启动槽容器')
+    try {
+      const boot = await startSlotReady(vm, projectRoot, { routing })
+      if (!boot?.ok) {
+        push('error', `启动槽失败：${boot?.error || 'unknown'}`)
+        return done({
+          ok: false,
+          vm_id: vmId,
+          error: { code: boot?.code || 'slot_start_failed', message: boot?.error || '槽启动失败' },
+          log,
+          duration_ms: Date.now() - started,
+        })
+      }
+      push('info', `槽已启动 action=${boot.action || 'started'} engine=${boot.engine || 'n/a'}`)
+      if (boot.runtime) {
+        try {
+          atomicWriteJson(path.join(projectRoot, 'vms', `${vmId}.json`), {
+            ...getVm(projectRoot, vmId),
+            status: 'running',
+            runtime: boot.runtime,
+            updated_at: new Date().toISOString(),
+          })
+        } catch {}
+      }
+    } catch (error) {
+      push('error', `启动槽异常：${String(error?.message || error)}`)
+      return done({
+        ok: false,
+        vm_id: vmId,
+        error: { code: 'slot_start_failed', message: String(error?.message || error) },
+        log,
+        duration_ms: Date.now() - started,
+      })
+    }
+  }
   const codex = isCodexVm(vm)
   const inferenceEngine = codex ? null : resolveInferenceEngine(vm, routing)
   const cliHop = !codex && resolveOfficialCcInference(vm, routing) === 'cli-hop'
