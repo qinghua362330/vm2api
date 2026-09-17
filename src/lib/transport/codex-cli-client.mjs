@@ -355,6 +355,12 @@ export async function streamCodexCli({
   onEvent = null,
   spawnImpl = spawn,
   now = () => Date.now(),
+  /**
+   * 在哪个环境里执行 CLI。
+   *   省略            → 宿主进程
+   *   { container }   → `docker exec -i <container> <bin> …`（对照 Claude 的槽内执行）
+   */
+  runner = null,
 } = {}) {
   const startedAt = now()
   const binPath = bin || codexBinPath({ projectRoot: exec?.projectRoot })
@@ -376,6 +382,14 @@ export async function streamCodexCli({
     sandbox,
   })
 
+  // 在哪跑 CLI：宿主进程，或 exec 进槽容器。对照 Claude 的做法 —— 推理在槽里跑，
+  // 槽外的宿主只负责搬运。容器模式下 env 由容器自己持有（CODEX_HOME 已挂载），
+  // 包装进程只需要 docker 本身的环境。
+  const inContainer = !!runner?.container
+  const command = inContainer ? runner.docker || 'docker' : binPath
+  const commandArgs = inContainer ? ['exec', '-i', runner.container, runner.bin || binPath, ...args] : args
+  const commandEnv = inContainer ? { ...process.env } : childEnv
+
   const state = newCodexStreamState({ model: model || body.model || null })
   let stderr = ''
   let buffer = ''
@@ -396,8 +410,8 @@ export async function streamCodexCli({
     }
     let child = null
     try {
-      child = spawnImpl(binPath, args, {
-        env: childEnv,
+      child = spawnImpl(command, commandArgs, {
+        env: commandEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: exec?.cwd || undefined,
       })

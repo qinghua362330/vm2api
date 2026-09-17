@@ -27,6 +27,16 @@ import {
 } from './vm-runtime.mjs'
 import { inspectWrapCliDir, materializeWrapCli, wrapCliHomeDir } from './wrap-cli-runtime.mjs'
 import { boundProxyUrl } from './egress.mjs'
+import { imageForKernel } from './vm-runtime.mjs'
+import {
+  destroyCodexSlotRuntime,
+  inspectCodexContainer,
+  preflightCodexSlot,
+  startCodexSlotRuntime,
+  stopCodexSlotRuntime,
+  codexContainerName,
+} from './codex-runtime.mjs'
+import { codexBinPath } from '../transport/codex-cli-client.mjs'
 
 export { runtimeKind }
 
@@ -40,8 +50,23 @@ function kvmRefuse(action) {
   return { ...KVM_NOT_CONFIGURED, action, runtime: RUNTIME_KVM }
 }
 
+/**
+ * 起槽。codex 槽和 Claude 槽现在是同形的一条链：都是 kin-os 容器、同样的机器身份与
+ * 资源限制、都走槽自己的 SOCKS 网络，只是容器里装的东西不同（Claude 挂 cli-home 并
+ * 常驻 kin-kernel；codex 挂 codex-home 与 codex 二进制，待命等驱动 exec 进来）。
+ */
 export function startSlot(vm, projectRoot, opts = {}) {
   if (runtimeKind(vm) === RUNTIME_KVM) return kvmRefuse('start')
+  if (isCodexVm(vm)) {
+    const image = opts.image || imageForKernel(vm.kernel || 'ubuntu-24.04')
+    return startCodexSlotRuntime(vm, projectRoot, {
+      image,
+      codexBin: codexBinPath({ projectRoot }),
+      shImpl: opts.ops?.sh,
+      inspectImpl: opts.ops?.inspectCodexContainer,
+      limits: opts.limits,
+    })
+  }
   return startVmRuntime(vm, projectRoot, opts)
 }
 
@@ -57,15 +82,20 @@ export async function startSlotReady(vm, projectRoot, opts = {}) {
   return attachInferenceRuntime(boot, vm, projectRoot, opts)
 }
 
-export function stopSlot(vm) {
-  if (isCodexVm(vm)) stopCodexKernel(vm.id)
+export function stopSlot(vm, opts = {}) {
+  if (isCodexVm(vm)) {
+    stopCodexKernel(vm.id)
+    if (runtimeKind(vm) === RUNTIME_KVM) return kvmRefuse('stop')
+    return stopCodexSlotRuntime(vm, { shImpl: opts.ops?.sh })
+  }
   if (runtimeKind(vm) === RUNTIME_KVM) return kvmRefuse('stop')
   return stopVmRuntime(vm)
 }
 
 /** Destroy the slot container. Used only by explicit reset / delete. */
-export function destroySlot(vm) {
+export function destroySlot(vm, opts = {}) {
   if (runtimeKind(vm) === RUNTIME_KVM) return kvmRefuse('destroy')
+  if (isCodexVm(vm)) return destroyCodexSlotRuntime(vm, { shImpl: opts.ops?.sh })
   return destroyVmRuntime(vm)
 }
 

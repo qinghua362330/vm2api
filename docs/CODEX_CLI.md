@@ -127,9 +127,34 @@ CLI 的 JSONL → Responses SSE 都在 `codex-cli-client.mjs`：
 claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽返回 `claude_vm`），
 默认不传保持原行为。
 
+## 槽容器：与 Claude 槽同形
+
+`src/lib/vm/codex-runtime.mjs` 让 codex 槽和 Claude 槽走同一条容器链 —— 同一套机器
+身份、资源限制与网络规则，只有挂进去的东西不同：
+
+| | Claude 槽 | codex 槽 |
+|---|---|---|
+| 镜像 | `kin-os/*`（按 `vm.kernel`） | 同一个 |
+| 网络 | 槽绑 SOCKS5 的透明网络，无代理拒绝启动 | 同一条规则 |
+| 机器身份 | `/etc/machine-id` + `/var/lib/dbus/machine-id` 只读挂载（`ensureGuestMachineIdFile`） | 同一个函数、同一个目标路径 |
+| 资源限制 | 只读根、tmpfs、`--memory`/`--pids-limit`、`no-new-privileges`、`--cap-drop ALL` | 逐条相同 |
+| 挂载 | `cli-home` → `/home/kincli` + `kin-kernel`/`kin-worker` | `codex-home` → `/home/kincli/.codex`（CODEX_HOME）+ `bin/codex` → `/usr/local/bin/codex:ro` |
+| 容器内常驻 | `kin-kernel --gateway-worker`（PID 1） | 无常驻网关：`sleep infinity` 待命，CLI 由驱动 `docker exec -i` 进来跑 |
+
+启动前 `preflightCodexSlot()` 会把缺的东西一次说清（`codex_bin` / `codex_credential_missing`
+/ `slot_network` / `image_missing`），而不是 `docker run` 到一半才炸 —— 只读根 + 只读挂载
+意味着缺一样都是启动后才发现。
+
+凭证在槽启动时由宿主写进 `vms/<id>/codex-home/auth.json`（`ensureCodexSlotHome`），
+与 Claude 侧"host writes credentials"一致；容器只读用。
+
+驱动侧按容器是否在跑来选执行位置：容器在跑 → `docker exec -i <container> codex exec --json`；
+没有容器 → 退回宿主进程（老环境不至于因此不可用）。
+
 ## 尚未做（下一步）
 
-1. 槽内容器化：现在 CLI 跑在宿主（一槽一份 CODEX_HOME），下一步把它放进槽容器，
-   拿到机器级指纹隔离；
-2. 常驻 `codex app-server`（省掉每请求冷启动）；
-3. codex 配额闸门（`GetAccountRateLimits`）与计费。
+1. codex kernel 也移进容器（现在宿主 socket 服务；Claude 侧的内核在容器里），
+   让 socket 与 kernel 生命周期完全对齐；
+2. 面板支持直接新建 codex 槽（现在仍需"先建 Claude 槽再导入 codex 凭证"）；
+3. 常驻 `codex app-server`（省掉每请求冷启动）；
+4. codex 配额闸门（`GetAccountRateLimits`）与计费。

@@ -10,6 +10,7 @@ import { streamCodexKernel } from '../transport/codex-kernel-client.mjs'
 import { ensureCodexKernel, writeCodexKernelConfig } from '../transport/codex-kernel-supervisor.mjs'
 import { codexBinPath, streamCodexCli } from '../transport/codex-cli-client.mjs'
 import { materializeCodexHome } from '../vm/codex-home.mjs'
+import { CODEX_BIN_IN_CONTAINER, codexContainerName, inspectCodexContainer } from '../vm/codex-runtime.mjs'
 import { readCodexAccounts } from '../vm/codex-slot.mjs'
 import { boundProxyUrl } from '../vm/egress.mjs'
 import { pickLeastLoadedEgress, resolveUserDispatch, slotVerdict } from '../pool/egress-binding.mjs'
@@ -133,6 +134,18 @@ export function pickCodexVm(projectRoot, req, { gates = {}, ownerScope = null, v
     slotId: resolved.slotId,
     userId,
     scope: resolved.migrated ? 'user-migrated' : resolved.created || resolved.assigned ? 'user-assigned' : 'user',
+  }
+}
+
+/** 槽容器在不在跑：在跑就把 CLI 放进容器执行。 */
+export function codexSlotContainer(vm, { inspect = inspectCodexContainer } = {}) {
+  const name = vm?.runtime?.container || codexContainerName(vm?.id)
+  if (!name) return null
+  try {
+    const info = inspect(name)
+    return info?.running ? name : null
+  } catch {
+    return null
   }
 }
 
@@ -322,6 +335,7 @@ export async function handleCodexProtocol({
   // CLI 形态下凭证/出口落在槽自己的 CODEX_HOME 里（一槽一份，互不串味）；这条链
   // 同样不允许"没绑代理就直连"—— 那会让槽从宿主机 IP 出去，等于把身份换了。
   let cliEnv = null
+  let cliRunner = null
   if (engine === 'cli') {
     if (!proxyUrl) {
       stats.errors++
@@ -330,6 +344,9 @@ export async function handleCodexProtocol({
         error: { type: 'api_error', code: 'proxy_required', message: 'Codex 槽未绑定代理，拒绝直连' },
       })
     }
+    // 槽容器在跑就用容器内的 CLI（对照 Claude：推理在槽里）；否则退回宿主进程。
+    // 这一步只决定"在哪跑"，凭证与出口两者一致 —— 都在槽自己的 CODEX_HOME 与代理里。
+    const container = codexSlotContainer(vm)
     const prepared = materializeCodexHome({
       projectRoot,
       vm,
@@ -348,6 +365,7 @@ export async function handleCodexProtocol({
       })
     }
     cliEnv = prepared.env
+    cliRunner = container ? { container, bin: CODEX_BIN_IN_CONTAINER, docker: 'docker' } : null
   } else {
     writeCodexKernelConfig(projectRoot, vm, { proxyUrl, proxyRequired: true })
     const ready = await ensureCodexKernel(execFor(projectRoot, vm))
@@ -377,9 +395,11 @@ export async function handleCodexProtocol({
         ((args) =>
           streamCodexCli({
             ...args,
-            bin: binPath,
+            bin: cliRunner ? CODEX_BIN_IN_CONTAINER : binPath,
             codexHome: cliEnv?.CODEX_HOME || null,
             env: cliEnv || {},
+            // 容器模式下 CODEX_HOME 是容器内路径，宿主侧的 env 不外传
+            runner: cliRunner,
             resume: !!session?.previous_response_id,
             threadId: session?.previous_response_id || null,
           }))
