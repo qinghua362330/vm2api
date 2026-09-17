@@ -447,3 +447,36 @@ test('容器内 kernel 起不来时，把它的报错带回来（docker exec -d 
     fs.rmSync(project, { recursive: true, force: true })
   }
 })
+
+test('容器模式写下的 kernel 配置要交给槽的 uid（否则容器里 Permission denied）', async () => {
+  const { writeCodexKernelConfig } = await import('../../src/lib/transport/codex-kernel-supervisor.mjs')
+  const { slotUidFor, SLOT_GID } = await import('../../src/lib/vm/slot-uid.mjs')
+  const project = tmp()
+  try {
+    const { vm } = codexSlot(project)
+    // chown 必须发生：这里用注入的 spy 断言（开发机不是 root，真 chown 会失败）
+    const chowned = []
+    const written = writeCodexKernelConfig(project, vm, {
+      inContainer: true,
+      ops: { chown: (file, target) => chowned.push([file, slotUidFor(target)]) },
+    })
+    const uid = slotUidFor(vm)
+    const wantFiles = [written.configPath, written.tokenPath, written.credentialPath, written.runDir]
+    assert.deepEqual(
+      chowned.map(([file]) => file).sort(),
+      wantFiles.slice().sort(),
+      'config / token / 凭证 / 运行目录都要交给槽的 uid',
+    )
+    for (const [, owner] of chowned) assert.equal(owner, uid)
+    // 真跑在 root 上（部署环境）时，顺带验一次真实属主
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      for (const file of wantFiles) {
+        const st = fs.statSync(file)
+        assert.equal(st.uid, uid, `${file} 的属主应是槽 uid ${uid}`)
+        assert.equal(st.gid, Number(SLOT_GID))
+      }
+    }
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})

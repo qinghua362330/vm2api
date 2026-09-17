@@ -7,6 +7,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { boundProxyUrl } from '../vm/egress.mjs'
+import { SLOT_GID, chownForSlot, slotUidFor } from '../vm/slot-uid.mjs'
 import { codexKernelHealth, codexKernelPaths } from './codex-kernel-client.mjs'
 
 const starts = new Map()
@@ -48,7 +49,11 @@ export function codexKernelBinPath() {
  * 拿宿主那串 `socks5h://127.0.0.1:port` 进去只会连到自己。Claude 的 kernel 配置也是
  * 这么写的（`proxy_url: ''`、`proxy_required: false`）。
  */
-export function writeCodexKernelConfig(projectRoot, vm, { token, proxyUrl, proxyRequired, inContainer = false } = {}) {
+export function writeCodexKernelConfig(
+  projectRoot,
+  vm,
+  { token, proxyUrl, proxyRequired, inContainer = false, ops = {} } = {},
+) {
   if (!projectRoot || !vm?.id) return null
   const runDir = path.join(projectRoot, 'vms', vm.id, 'run')
   fs.mkdirSync(runDir, { recursive: true, mode: 0o700 })
@@ -90,6 +95,15 @@ export function writeCodexKernelConfig(projectRoot, vm, { token, proxyUrl, proxy
     test_endpoints: process.env.KIN_CODEX_TEST_ENDPOINTS === '1',
   }
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
+  if (inContainer) {
+    // 容器里的 kernel 以槽的 uid 运行：宿主写的 config / token / 凭证必须交给它，
+    // 否则它读到的是 Permission denied，而宿主侧只看到"内核起不来"。
+    const chown = ops.chown || chownForSlot
+    for (const file of [configPath, tokenPath, credentialPath]) {
+      if (file) chown(file, vm)
+    }
+    chown(runDir, vm)
+  }
   return { runDir, socketPath, configPath, credentialPath, tokenPath }
 }
 

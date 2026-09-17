@@ -27,6 +27,7 @@ import { slotNetworkForVm } from './egress.mjs'
 import { codexHomeDir, materializeCodexHome } from './codex-home.mjs'
 import { codexKernelBinPath } from '../transport/codex-kernel-supervisor.mjs'
 import { readCodexAccounts } from './codex-slot.mjs'
+import { SLOT_GID, slotUidFor } from './slot-uid.mjs'
 
 export const CODEX_RUNTIME = 'docker'
 export const CODEX_HOME_IN_CONTAINER = '/home/kincli/.codex'
@@ -61,8 +62,7 @@ export function codexContainerName(vmId) {
 }
 
 export function codexRuntimeUser(vm) {
-  const index = Number(String(vm?.id || '').replace(/\D+/g, '')) || 1
-  return `${UID_BASE + index}:${GID}`
+  return `${slotUidFor(vm)}:${SLOT_GID}`
 }
 
 export function inspectCodexContainer(name, { shImpl = sh } = {}) {
@@ -188,8 +188,7 @@ export function startCodexSlotRuntime(
   const runDir = path.join(projectRoot, 'vms', vm.id, 'run')
   fs.mkdirSync(runDir, { recursive: true, mode: 0o700 })
   try {
-    const uid = Number(codexRuntimeUser(vm).split(':')[0])
-    fs.chownSync(runDir, uid, Number(GID))
+    fs.chownSync(runDir, slotUidFor(vm), Number(SLOT_GID))
     fs.chmodSync(runDir, 0o700)
   } catch {}
   const machineIdFile = ensureGuestMachineIdFile(projectRoot, vm)
