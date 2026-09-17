@@ -47,7 +47,12 @@ import {
 import { buildEgressGates, coolSlot } from '../pool/egress-gates.mjs'
 import { hostEgressStatus, detectPublicIp } from '../vm/host-identity.mjs'
 import { SettingsRepo } from '../db/repos/settings-repo.mjs'
-import { parseCodexImportPayload, upsertCodexAccount, readCodexAccounts } from '../vm/codex-slot.mjs'
+import {
+  parseCodexImportPayload,
+  upsertCodexAccount,
+  readCodexAccounts,
+  summarizeCodexSlot,
+} from '../vm/codex-slot.mjs'
 import { generateAuthUrl, exchangeAuthCode, normalizeOauthFlavor } from '../oauth/oauth-auth-url.mjs'
 import { sessionKeyToOAuth, panelImportErrorPayload } from '../../../scripts/session-to-oauth.mjs'
 import { generateCodexAuthUrl, exchangeCodexAuthCode } from '../oauth/codex-oauth.mjs'
@@ -293,9 +298,23 @@ export function createPanelHandler(ctx) {
     return String(forwarded || req?.socket?.remoteAddress || '').slice(0, 45)
   }
 
+  /**
+   * 槽里到底有没有可用凭证。
+   *
+   * `vmHasClaudeCredential` 只看 Claude 那一套：codex 槽的凭证在
+   * `vms/<id>/codex-credentials.json` 里，用它判断会把一个配好的 codex 槽标成
+   * `no_credential` → `schedulable: false`，于是请求侧一律 `no_codex_slot`。
+   * 线上就是这么撞到的。
+   */
+  function slotHasCredential(vm) {
+    if (!vm) return false
+    if (isCodexVm(vm)) return !!summarizeCodexSlot(cfg.paths.project, vm).has_token
+    return vmHasClaudeCredential(vm)
+  }
+
   function restoreSchedulableIfReady(vmId) {
     const vm = getVm(cfg.paths.project, vmId)
-    if (!vmHasClaudeCredential(vm)) {
+    if (!slotHasCredential(vm)) {
       setVmSchedulable(cfg.paths.project, vmId, false, 'no_credential')
       return
     }
@@ -3124,7 +3143,7 @@ export function createPanelHandler(ctx) {
         const boot = await startSlotReady(vm, cfg.paths.project, { routing: ctx.routingConfig })
         if (!boot.ok) return json(res, 500, { ok: false, error: { message: boot.error || 'runtime start failed' } })
         vm.status = 'running'
-        if (vmHasClaudeCredential(vm)) {
+        if (slotHasCredential(vm)) {
           vm.schedulable = true
           vm.schedule_disabled_reason = null
         } else {
@@ -3226,6 +3245,11 @@ export function createPanelHandler(ctx) {
               account.expires_at = tok.expires_at || account.expires_at
             }
             const committed = await commitImportedCodexVm({ cfg, vmPath, existing, account })
+            // 凭证到位就该可调度：否则导完还得手动再点一次"启动"，
+            // 而中间那段时间请求侧只会看到 no_codex_slot。
+            if (slotHasCredential(getVm(cfg.paths.project, existing.id) || existing)) {
+              setVmSchedulable(cfg.paths.project, existing.id, true)
+            }
             return json(res, 200, panel.ok(committed))
           }
 

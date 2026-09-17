@@ -480,3 +480,21 @@ test('容器模式写下的 kernel 配置要交给槽的 uid（否则容器里 P
     fs.rmSync(project, { recursive: true, force: true })
   }
 })
+
+test('codex 槽的调度标记按 codex 凭证判，不套 Claude 的检查', async () => {
+  const { summarizeCodexSlot } = await import('../../src/lib/vm/codex-slot.mjs')
+  const project = tmp()
+  try {
+    const { vm } = codexSlot(project)
+    // 有凭证：has_token 必须为真（用它来决定 schedulable）
+    const withCred = summarizeCodexSlot(project, vm)
+    assert.equal(withCred.has_token, true)
+    assert.equal(withCred.has_refresh, true)
+    assert.equal(withCred.chatgpt_account_id, 'acc-7')
+    // 没凭证：不能误判为可调度
+    fs.writeFileSync(path.join(project, 'vms', 'vm-7', 'codex-credentials.json'), JSON.stringify({ accounts: [] }))
+    assert.equal(summarizeCodexSlot(project, vm).has_token, false)
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
