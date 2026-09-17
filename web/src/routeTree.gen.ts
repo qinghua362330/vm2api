@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAnnouncementsRouteImport } from './routes/_authenticated/announcements'
 import { Route as AuthenticatedApiRouteImport } from './routes/_authenticated/api'
+import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedClusterRouteImport } from './routes/_authenticated/cluster'
@@ -64,6 +65,11 @@ const AuthenticatedAnnouncementsRoute =
 const AuthenticatedApiRoute = AuthenticatedApiRouteImport.update({
   id: '/api',
   path: '/api',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedAuditRoute = AuthenticatedAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedBillingRoute = AuthenticatedBillingRouteImport.update({
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/announcements': typeof AuthenticatedAnnouncementsRoute
   '/api': typeof AuthenticatedApiRoute
+  '/audit': typeof AuthenticatedAuditRoute
   '/billing': typeof AuthenticatedBillingRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/cluster': typeof AuthenticatedClusterRoute
@@ -238,6 +245,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/announcements': typeof AuthenticatedAnnouncementsRoute
   '/api': typeof AuthenticatedApiRoute
+  '/audit': typeof AuthenticatedAuditRoute
   '/billing': typeof AuthenticatedBillingRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/cluster': typeof AuthenticatedClusterRoute
@@ -272,6 +280,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/announcements': typeof AuthenticatedAnnouncementsRoute
   '/_authenticated/api': typeof AuthenticatedApiRoute
+  '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/billing': typeof AuthenticatedBillingRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/cluster': typeof AuthenticatedClusterRoute
@@ -307,6 +316,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/announcements'
     | '/api'
+    | '/audit'
     | '/billing'
     | '/channels'
     | '/cluster'
@@ -338,6 +348,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/announcements'
     | '/api'
+    | '/audit'
     | '/billing'
     | '/channels'
     | '/cluster'
@@ -371,6 +382,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authenticated/announcements'
     | '/_authenticated/api'
+    | '/_authenticated/audit'
     | '/_authenticated/billing'
     | '/_authenticated/channels'
     | '/_authenticated/cluster'
@@ -440,6 +452,13 @@ declare module '@tanstack/react-router' {
       path: '/api'
       fullPath: '/api'
       preLoaderRoute: typeof AuthenticatedApiRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/audit': {
+      id: '/_authenticated/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuthenticatedAuditRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/billing': {
@@ -630,6 +649,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAnnouncementsRoute: typeof AuthenticatedAnnouncementsRoute
   AuthenticatedApiRoute: typeof AuthenticatedApiRoute
+  AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedClusterRoute: typeof AuthenticatedClusterRoute
@@ -662,6 +682,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAnnouncementsRoute: AuthenticatedAnnouncementsRoute,
   AuthenticatedApiRoute: AuthenticatedApiRoute,
+  AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedBillingRoute: AuthenticatedBillingRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedClusterRoute: AuthenticatedClusterRoute,

@@ -19,6 +19,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  ShieldCheck,
   Ticket,
   Users,
   Wallet,
@@ -41,6 +42,7 @@ export type ViewId =
   | 'payments'
   | 'wallet'
   | 'ledger'
+  | 'audit'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -68,6 +70,7 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   payments: '充值订单',
   wallet: '我的钱包',
   ledger: '余额流水',
+  audit: '审计日志',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -100,6 +103,7 @@ export const NAV_ITEMS: {
   { id: 'payments', url: '/payments', icon: CreditCard },
   { id: 'wallet', url: '/wallet', icon: Wallet },
   { id: 'ledger', url: '/ledger', icon: Receipt },
+  { id: 'audit', url: '/audit', icon: ShieldCheck },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },

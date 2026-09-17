@@ -21,6 +21,7 @@ import { RefusalGuardsRepo } from '../db/repos/refusal-guards-repo.mjs'
 import { mergeNotifyConfig, publicNotifyConfig, publicRoutingNotify, sendNotifyTest } from './notify.mjs'
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import { publicUserView } from './panel-users.mjs'
+import { AUDIT_ACTIONS, AuditLog } from './audit-log.mjs'
 import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
 import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
 import { BalanceLedger } from '../billing/balance-ledger.mjs'
@@ -780,6 +781,8 @@ export function createPanelHandler(ctx) {
           }
           const body = await readBody(req, 128 * 1024).catch(() => ({}))
           const saved = store.set(body)
+          // detail is the patch only; AuditLog turns every secret field into [redacted].
+          audit(req, AUDIT_ACTIONS.paymentConfig, { targetType: 'payment', targetId: 'config', detail: body })
           return json(res, 200, panel.ok({ config: publicPaymentConfig(saved), usable_channels: usableChannels(saved) }))
         }
         const confirm = p.match(/^\/api\/panel\/payments\/orders\/([^/]+)\/confirm$/)
@@ -787,10 +790,16 @@ export function createPanelHandler(ctx) {
           if (!admin) {
             return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
           }
+          const orderNo = decodeURIComponent(confirm[1])
           const result = orders.markPaid({
-            orderNo: decodeURIComponent(confirm[1]),
+            orderNo,
             providerTradeNo: `manual:${ident.username || 'admin'}`,
             raw: JSON.stringify({ manual_by: ident.username || 'admin' }),
+          })
+          audit(req, AUDIT_ACTIONS.paymentConfirm, {
+            targetType: 'order',
+            targetId: orderNo,
+            detail: { credited: result.credited, already_paid: result.alreadyPaid === true },
           })
           return json(res, result.ok ? 200 : 400, panel.ok(result))
         }
@@ -815,6 +824,11 @@ export function createPanelHandler(ctx) {
             dailyQuota: body.daily_quota,
             notes: body.notes || `by ${ident.username || 'admin'}`,
           })
+          audit(req, AUDIT_ACTIONS.subscriptionGrant, {
+            targetType: 'subscription',
+            targetId: result.subscription?.id ?? body.user_id,
+            detail: { user_id: body.user_id, days: body.days, plan: body.plan, extended: result.extended },
+          })
           return json(res, result.ok ? 200 : 400, panel.ok(result))
         }
         const subId = p.match(/^\/api\/panel\/subscriptions\/(\d+)(\/[a-z]+)?$/)
@@ -829,7 +843,9 @@ export function createPanelHandler(ctx) {
             return json(res, 200, panel.ok({ subscription: subs.update(id, body) }))
           }
           if (req.method === 'POST' && sub === '/revoke') {
-            return json(res, 200, panel.ok(subs.revoke(id)))
+            const revoked = subs.revoke(id)
+            audit(req, AUDIT_ACTIONS.subscriptionRevoke, { targetType: 'subscription', targetId: id })
+            return json(res, 200, panel.ok(revoked))
           }
           if (req.method === 'DELETE' && !sub) {
             return json(res, 200, panel.ok(subs.revoke(id)))
@@ -840,6 +856,37 @@ export function createPanelHandler(ctx) {
         if (req.method === 'GET' && byUser) {
           const uid = decodeURIComponent(byUser[1])
           return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
+      // ---- 审计日志 ----
+      if (p === '/api/panel/audit-logs' || p.startsWith('/api/panel/audit-logs/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const logs = new AuditLog()
+        if (req.method === 'GET' && p === '/api/panel/audit-logs') {
+          const action = String(url.searchParams.get('action') || '').trim() || null
+          const actor = String(url.searchParams.get('actor') || '').trim() || null
+          const targetType = String(url.searchParams.get('target_type') || '').trim() || null
+          const targetId = String(url.searchParams.get('target_id') || '').trim() || null
+          return json(
+            res,
+            200,
+            panel.ok({
+              entries: logs.list({ action, actor, targetType, targetId, limit: Number(url.searchParams.get('limit')) || 200 }),
+              stats: logs.stats(),
+            }),
+          )
+        }
+        // Retention is manual: purging on a timer would delete evidence nobody
+        // asked to drop.
+        if (req.method === 'POST' && p === '/api/panel/audit-logs/purge') {
+          const body = await readBody(req, 16 * 1024).catch(() => ({}))
+          const result = logs.purgeOlderThan(body.days)
+          audit(req, 'audit.purge', { detail: { days: body.days, removed: result.removed } })
+          return json(res, 200, panel.ok(result))
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
@@ -901,6 +948,11 @@ export function createPanelHandler(ctx) {
             amount >= 0
               ? ledger.credit({ userId: body.user_id, amount, source: 'admin', notes: body.notes || `by ${ident.username || 'admin'}` })
               : ledger.debit({ userId: body.user_id, amount: Math.abs(amount), source: 'admin', notes: body.notes || `by ${ident.username || 'admin'}`, allowNegative: body.allow_negative === true })
+          audit(req, AUDIT_ACTIONS.balanceAdjust, {
+            targetType: 'user',
+            targetId: body.user_id,
+            detail: { amount, balance_after: result.balance, reason: body.notes || null },
+          })
           return json(res, result.ok ? 200 : 400, panel.ok(result))
         }
       }
@@ -928,6 +980,11 @@ export function createPanelHandler(ctx) {
               code: body.code ?? null,
               createdBy: ident.username || 'admin',
             })
+            audit(req, AUDIT_ACTIONS.redeemCreate, {
+              targetType: 'redeem',
+              targetId: body.batch || null,
+              detail: { count: created.length, value: body.value, type: body.type, max_uses: body.max_uses },
+            })
             return json(res, 200, panel.ok({ created: created.length, codes: created.map((c) => c.code) }))
           } catch (error) {
             return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_redeem_batch' } })
@@ -936,6 +993,7 @@ export function createPanelHandler(ctx) {
         const redeemId = p.match(/^\/api\/panel\/redeem\/(\d+)$/)
         if (redeemId && req.method === 'DELETE') {
           redeem.remove(Number(redeemId[1]))
+          audit(req, AUDIT_ACTIONS.redeemDelete, { targetType: 'redeem', targetId: redeemId[1] })
           return json(res, 200, panel.ok({ removed: Number(redeemId[1]) }))
         }
         const redeemCode = p.match(/^\/api\/panel\/redeem\/([^/]+)\/use$/)
@@ -986,7 +1044,13 @@ export function createPanelHandler(ctx) {
         if (req.method === 'POST' && p === '/api/panel/announcements') {
           const body = await readBody(req, 128 * 1024).catch(() => ({}))
           try {
-            return json(res, 200, panel.ok({ announcement: announcements.create({ ...body, created_by: ident.username || 'admin' }) }))
+            const created = announcements.create({ ...body, created_by: ident.username || 'admin' })
+            audit(req, AUDIT_ACTIONS.announcementCreate, {
+              targetType: 'announcement',
+              targetId: created.id,
+              detail: { title: created.title, audience: created.audience, status: created.status },
+            })
+            return json(res, 200, panel.ok({ announcement: created }))
           } catch (error) {
             return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_announcement' } })
           }
@@ -998,7 +1062,9 @@ export function createPanelHandler(ctx) {
             return json(res, 200, panel.ok({ announcement: announcements.update(Number(annId[1]), body) }))
           }
           if (req.method === 'DELETE') {
-            return json(res, 200, panel.ok({ removed: announcements.remove(Number(annId[1])) }))
+            const removed = announcements.remove(Number(annId[1]))
+            audit(req, AUDIT_ACTIONS.announcementDelete, { targetType: 'announcement', targetId: annId[1] })
+            return json(res, 200, panel.ok({ removed }))
           }
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
@@ -1022,6 +1088,11 @@ export function createPanelHandler(ctx) {
             const channel = channels.create(body)
             if (Array.isArray(body.buckets)) channels.setBuckets(channel.id, body.buckets)
             if (Array.isArray(body.pricing)) channels.setPricing(channel.id, body.pricing)
+            audit(req, AUDIT_ACTIONS.channelCreate, {
+              targetType: 'channel',
+              targetId: channel.id,
+              detail: { name: channel.name, buckets: body.buckets },
+            })
             return json(res, 200, panel.ok({ channel }))
           } catch (error) {
             return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_channel' } })
@@ -1057,15 +1128,26 @@ export function createPanelHandler(ctx) {
               for (const existing of channels.listUserIds(channelId)) channels.removeUser(channelId, existing)
               for (const uid of body.users) channels.addUser(channelId, uid)
             }
+            audit(req, AUDIT_ACTIONS.channelUpdate, {
+              targetType: 'channel',
+              targetId: channelId,
+              detail: { patch: body, buckets: body.buckets, pricing_rows: body.pricing?.length },
+            })
             return json(res, 200, panel.ok({ channel: updated }))
           }
           if (req.method === 'DELETE' && !sub) {
             channels.remove(channelId)
+            audit(req, AUDIT_ACTIONS.channelDelete, { targetType: 'channel', targetId: channelId })
             return json(res, 200, panel.ok({ removed: channelId }))
           }
           if (req.method === 'POST' && sub === '/buckets') {
             const body = await readBody(req, 64 * 1024).catch(() => ({}))
             const result = channels.setBuckets(channelId, body.buckets || [])
+            audit(req, AUDIT_ACTIONS.channelBuckets, {
+              targetType: 'channel',
+              targetId: channelId,
+              detail: { buckets: body.buckets, rejected: result.rejected },
+            })
             return json(res, result.rejected?.length ? 409 : 200, panel.ok(result))
           }
           if (req.method === 'POST' && sub === '/pricing') {
@@ -1165,6 +1247,11 @@ export function createPanelHandler(ctx) {
 
         if (req.method === 'POST' && p === '/api/panel/users') {
           const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          audit(req, AUDIT_ACTIONS.userCreate, {
+            targetType: 'user',
+            targetId: body.username,
+            detail: { role: body.role, status: body.status },
+          })
           try {
             const rec = panelUsers.create({
               username: body.username,
@@ -1222,10 +1309,13 @@ export function createPanelHandler(ctx) {
             const rec = Object.keys(patch).length
               ? panelUsers.update(userId, patch, { actorId: ident.id || null })
               : usersRepo?.getById(userId) || target
+            // detail carries the patch verbatim; AuditLog redacts the password.
+            audit(req, AUDIT_ACTIONS.userUpdate, { targetType: 'user', targetId: userId, detail: body })
             return json(res, 200, panel.ok({ user: publicUserView(rec) }))
           }
           if (req.method === 'DELETE') {
             panelUsers.remove(userId, { actorId: ident.id || null })
+            audit(req, AUDIT_ACTIONS.userDelete, { targetType: 'user', targetId: userId })
             return json(res, 200, panel.ok({ removed: userId }))
           }
         }
@@ -3758,6 +3848,11 @@ export function createPanelHandler(ctx) {
             },
             { repo },
           )
+          audit(req, AUDIT_ACTIONS.egressRebind, {
+            targetType: 'user',
+            targetId: body.user_id,
+            detail: { from: r.from, to: body.egress_id, slot: r.slotId, reason: r.reason },
+          })
           return json(res, r.ok ? 200 : 400, panel.ok(r))
         }
 
@@ -3773,6 +3868,11 @@ export function createPanelHandler(ctx) {
             },
             { repo },
           )
+          audit(req, AUDIT_ACTIONS.egressMigrate, {
+            targetType: 'user',
+            targetId: body.user_id,
+            detail: { from: r.fromSlot, to: r.slotId, egress: r.egressId, reason: body.reason || 'manual' },
+          })
           return json(res, r.ok ? 200 : 409, panel.ok(r))
         }
 
@@ -3785,6 +3885,9 @@ export function createPanelHandler(ctx) {
           const sweep = dryRun
             ? autoMigrateExhausted({ vms, gates, dryRun: true }, { repo })
             : autoMigrateExhausted({ vms, gates }, { repo })
+          if (!dryRun) {
+            audit(req, AUDIT_ACTIONS.egressSweep, { detail: { moved: sweep.moved, failed: sweep.failed } })
+          }
           return json(res, 200, panel.ok({ ...sweep, dry_run: dryRun }))
         }
 
@@ -3799,6 +3902,11 @@ export function createPanelHandler(ctx) {
             minutes: body.minutes,
             reason: body.reason || 'quota_exhausted',
             runtimeRepo: ctx.runtimeRepo,
+          })
+          audit(req, AUDIT_ACTIONS.egressCool, {
+            targetType: 'slot',
+            targetId: slotId,
+            detail: { minutes: body.minutes, reason: body.reason || 'quota_exhausted' },
           })
           return json(res, r.ok ? 200 : 400, panel.ok(r))
         }
@@ -3823,6 +3931,11 @@ export function createPanelHandler(ctx) {
         if (req.method === 'POST' && p === '/api/panel/egress-bindings/release') {
           const body = await readBody(req, 256 * 1024)
           const r = releaseSlot({ slotId: body.slot_id }, { repo })
+          audit(req, AUDIT_ACTIONS.egressRelease, {
+            targetType: 'slot',
+            targetId: body.slot_id,
+            detail: { released: r.released, users: r.users },
+          })
           return json(res, 200, panel.ok(r))
         }
 
