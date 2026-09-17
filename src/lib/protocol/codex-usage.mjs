@@ -116,13 +116,41 @@ function statusFromPercent(percent) {
   return 'ok'
 }
 
+/**
+ * 从三种输入里认出 snapshot：
+ *   1. 标准 snapshot（primary/secondary_*）
+ *   2. extra 映射（codex_5h_used_percent / codex_7d_used_percent …）
+ *   3. 已经算好的 view（{ snapshot, limits, quota, windows }）
+ *
+ * 第 3 种必须显式支持：`summarizeCodexSlot` 会把落盘的 `codex.usage` 再喂回本
+ * 函数。老实现只看顶层 `primary_used_percent`，于是把 view 当 extra 解析 ——
+ * 每个字段都变成 null，表现就是"上游明明回了 62%，面板永远 0% / —"。
+ */
+function hasSnapshotKeys(value = {}) {
+  if (!value || typeof value !== 'object') return false
+  return [
+    'primary_used_percent',
+    'secondary_used_percent',
+    'primary_window_minutes',
+    'secondary_window_minutes',
+    'primary_reset_at',
+    'secondary_reset_at',
+    'updated_at',
+  ].some((key) => value[key] != null)
+}
+
+function snapshotOf(input = {}) {
+  if (!input || typeof input !== 'object') return emptySnapshot()
+  const nested = input.snapshot
+  if (nested && typeof nested === 'object') {
+    return hasSnapshotKeys(nested) ? { ...emptySnapshot(), ...nested } : extraToCodexSnapshot(nested)
+  }
+  if (hasSnapshotKeys(input)) return input
+  return extraToCodexSnapshot(input)
+}
+
 export function buildCodexUsageView(extraOrSnapshot = {}) {
-  const snapshot =
-    extraOrSnapshot.primary_used_percent != null || extraOrSnapshot.codex_5h_used_percent != null
-      ? extraOrSnapshot.primary_used_percent != null
-        ? extraOrSnapshot
-        : extraToCodexSnapshot(extraOrSnapshot)
-      : extraToCodexSnapshot(extraOrSnapshot)
+  const snapshot = snapshotOf(extraOrSnapshot)
   const limits = normalizeCodexLimits(snapshot)
   const quota = codexLimitsToQuota(limits)
   return {
