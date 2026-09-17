@@ -845,10 +845,22 @@ export function createPanelHandler(ctx) {
       // ---- 订阅 ----
       if (p === '/api/panel/subscriptions' || p.startsWith('/api/panel/subscriptions/')) {
         const ident = panelIdentity(req)
-        if (ident.role !== 'admin' && ident.role !== 'super') {
+        const admin = ident.role === 'admin' || ident.role === 'super'
+        const subs = new SubscriptionService()
+        // 一个例外：租户读自己的额度。panel-acl 早就把这条路由授给了 user
+        // （自助页要用它），但这里整块被 admin 门挡住，声明与执行不一致 ——
+        // 结果是"有权限"的路由永远 403。只放行自己那一条，其余仍是运营面。
+        const byUser = p.match(/^\/api\/panel\/subscriptions\/user\/([^/]+)$/)
+        if (req.method === 'GET' && byUser) {
+          const uid = decodeURIComponent(byUser[1])
+          if (!admin && normalizeOwnerId(uid) !== normalizeOwnerId(req.panelUserId)) {
+            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'own subscription only' }))
+          }
+          return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
+        }
+        if (!admin) {
           return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
         }
-        const subs = new SubscriptionService()
         if (req.method === 'GET' && p === '/api/panel/subscriptions') {
           return json(res, 200, panel.ok({ subscriptions: subs.overview() }))
         }
@@ -887,12 +899,6 @@ export function createPanelHandler(ctx) {
           if (req.method === 'DELETE' && !sub) {
             return json(res, 200, panel.ok(subs.revoke(id)))
           }
-        }
-        // A user's own allowance, used by the user-facing pages.
-        const byUser = p.match(/^\/api\/panel\/subscriptions\/user\/([^/]+)$/)
-        if (req.method === 'GET' && byUser) {
-          const uid = decodeURIComponent(byUser[1])
-          return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }

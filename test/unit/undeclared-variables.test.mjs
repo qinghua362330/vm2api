@@ -26,13 +26,25 @@ test('no module uses an undeclared variable', (t) => {
   }
   const result = spawnSync(
     bin,
-    ['lint', '--only=correctness/noUndeclaredVariables', '--config-path=./biome.undeclared.json', 'src', 'test', 'scripts'],
+    [
+      'lint',
+      '--only=correctness/noUndeclaredVariables',
+      '--config-path=./biome.undeclared.json',
+      'src',
+      'test',
+      'scripts',
+    ],
     { cwd: repoRoot, encoding: 'utf8' },
   )
   const output = `${result.stdout || ''}${result.stderr || ''}`
   assert.equal(
     result.status,
     0,
-    `undeclared variables found:\n${output.split('\n').filter((line) => line.includes('noUndeclaredVariables')).join('\n') || output}`,
+    `undeclared variables found:\n${
+      output
+        .split('\n')
+        .filter((line) => line.includes('noUndeclaredVariables'))
+        .join('\n') || output
+    }`,
   )
 })
