@@ -630,3 +630,38 @@ test('槽容器没起来时默认拒绝（不静默降级到宿主身份）', as
     fs.rmSync(project, { recursive: true, force: true })
   }
 })
+
+test('提示词写进 stdin（`codex exec … -` 是读 stdin，不是 argv）', async () => {
+  const seen = { argv: null, stdin: null }
+  const fakeChild = () => {
+    const handlers = {}
+    const child = {
+      stdout: { setEncoding() {}, on: (ev, fn) => (handlers[`out:${ev}`] = fn) },
+      stderr: { setEncoding() {}, on: (ev, fn) => (handlers[`err:${ev}`] = fn) },
+      stdin: { end: (text) => (seen.stdin = text) },
+      on: (ev, fn) => {
+        handlers[ev] = fn
+        if (ev === 'close') setTimeout(() => fn(0), 0)
+        return child
+      },
+      kill() {},
+    }
+    return child
+  }
+  const result = await streamCodexCli({
+    exec: { projectRoot: '/tmp' },
+    body: {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    },
+    bin: 'codex',
+    spawnImpl: (cmd, args) => {
+      seen.argv = args
+      return fakeChild()
+    },
+    onEvent: async () => {},
+  })
+  assert.equal(result.ok, true, JSON.stringify(result.body))
+  assert.equal(seen.argv.at(-1), '-', 'argv 结尾的 - 表示从 stdin 读')
+  assert.equal(seen.stdin, 'ping', '提示词必须写进 stdin，否则 CLI 报 No prompt provided')
+})

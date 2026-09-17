@@ -412,9 +412,15 @@ export async function streamCodexCli({
     try {
       child = spawnImpl(command, commandArgs, {
         env: commandEnv,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // stdin 必须是管道：`codex exec … -` 是"从 stdin 读提示词"（长对话塞 argv 会
+        // 撞参数上限），所以提示词要写进去再关掉。用 'ignore' 会让 CLI 直接报
+        // "No prompt provided via stdin." —— 线上就是这么撞出来的。
+        stdio: ['pipe', 'pipe', 'pipe'],
         cwd: exec?.cwd || undefined,
       })
+      try {
+        child.stdin?.end?.(promptText)
+      } catch {}
     } catch (error) {
       finish({
         ok: false,
