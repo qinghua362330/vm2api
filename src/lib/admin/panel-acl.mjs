@@ -1,9 +1,13 @@
 /**
  * Panel RBAC.
  *
- *   admin  — full console（开源仓不含用户管理）
+ *   admin  — full console
  *   super  — overview / cluster / usage / logs + VM page (schedule only)
- *   user   — tenant: vm / proxies / keys / billing / logs (owner-scoped)
+ *   user   — tenant: vm / proxies / keys / billing / logs + 自助钱包与公告
+ *
+ * `PANEL_VIEWS` 必须覆盖前台 `web/src/config/nav.ts` 里的每一个 view：侧边栏是按
+ * `me.views` 过滤的，漏一个就等于那个页面在控制台里不存在 —— 页面与接口都在、就是
+ * 点不到。test/unit/panel-acl.test.mjs 里有一条专门盯这个漂移的用例。
  */
 
 export const PANEL_VIEWS = [
@@ -13,6 +17,18 @@ export const PANEL_VIEWS = [
   'import',
   'usage',
   'proxies',
+  'egress',
+  'users',
+  'channels',
+  'redeem',
+  'subscriptions',
+  'announcements',
+  'payments',
+  'wallet',
+  'ledger',
+  'audit',
+  'channel-monitor',
+  'ops',
   'models',
   'loadtest',
   'protocol',
@@ -26,7 +42,8 @@ export const PANEL_VIEWS = [
 ]
 
 const ROLE_VIEWS = {
-  user: ['vm', 'proxies', 'keys', 'billing', 'logs'],
+  // 租户看自己的：钱包（余额/订单/订阅）、公告，以及原有的机器/代理/密钥/计费/日志
+  user: ['vm', 'proxies', 'keys', 'billing', 'logs', 'wallet', 'announcements'],
   super: ['overview', 'cluster', 'usage', 'logs', 'vm'],
   admin: PANEL_VIEWS.slice(),
 }
@@ -196,6 +213,8 @@ function userKeyPathAllowed(method, path) {
  */
 function userWalletPathAllowed(method, path) {
   if (path === '/api/panel/wallet' && method === 'GET') return true
+  // 公告：路由按 audience 过滤成"这个人能看的那些"，所以租户读是安全的；写仍然 admin-only
+  if (path === '/api/panel/announcements' && method === 'GET') return true
   if (path === '/api/panel/payments/mine' && method === 'GET') return true
   if (path === '/api/panel/payments/checkout' && method === 'POST') return true
   if (/^\/api\/panel\/payments\/orders\/[^/]+$/.test(path) && method === 'GET') return true

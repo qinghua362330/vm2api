@@ -14,12 +14,12 @@ const serverSrc = [
   fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/server.mjs'), 'utf8'),
 ].join('\n')
 
-test('user sees vm / proxies / keys / billing / logs', () => {
-  assert.deepEqual(viewsForRole('user'), ['vm', 'proxies', 'keys', 'billing', 'logs'])
+test('user sees vm / proxies / keys / billing / logs + 自助钱包与公告', () => {
+  assert.deepEqual(viewsForRole('user'), ['vm', 'proxies', 'keys', 'billing', 'logs', 'wallet', 'announcements'])
   assert.equal(canViewPage('user', 'vm'), true)
   assert.equal(canViewPage('user', 'overview'), false)
   assert.equal(canViewPage('super', 'vm'), true)
-  assert.equal(canViewPage('admin', 'users'), false)
+  assert.equal(canViewPage('admin', 'users'), true)
   assert.equal(canViewPage('admin', 'api'), true)
   assert.equal(canViewPage('user', 'api'), false)
   assert.equal(canViewPage('admin', 'database'), true)
@@ -63,6 +63,31 @@ test('super can schedule VMs but cannot touch credentials or delete', () => {
   assert.equal(authorizePanelRoute('POST', '/api/panel/vms/create', 'super').ok, false)
   assert.equal(authorizePanelRoute('POST', '/api/panel/users', 'super').ok, false)
   assert.equal(authorizePanelRoute('GET', '/api/panel/database/metrics', 'super').ok, false)
+})
+
+test('前台 nav 里的每个 view 都要被 admin 授权（防漂移）', () => {
+  // 侧边栏按 me.views 过滤：ACL 漏一个 view，那个页面就"页面和接口都在、就是点不到"。
+  // 这条用例直接从 nav.ts 里读 id，两个文件再也没法悄悄走散。
+  const nav = fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/src/config/nav.ts'),
+    'utf8',
+  )
+  const ids = [...nav.matchAll(/\{ id: '([^']+)'/g)].map((m) => m[1])
+  assert.ok(ids.length > 20, `nav.ts 解析出 ${ids.length} 个 view，太少了，解析大概坏了`)
+  const allowed = new Set(viewsForRole('admin'))
+  const missing = ids.filter((id) => !allowed.has(id))
+  assert.deepEqual(missing, [], `这些页面没被授权，控制台里点不到：${missing.join(', ')}`)
+})
+
+test('租户视图是 admin 的子集，且能看自己的钱包与公告', () => {
+  const admin = new Set(viewsForRole('admin'))
+  for (const view of viewsForRole('user')) {
+    assert.ok(admin.has(view), `租户视图 ${view} 不在 admin 列表里`)
+  }
+  assert.equal(canViewPage('user', 'wallet'), true, '租户要能看自己的钱包')
+  assert.equal(canViewPage('user', 'announcements'), true, '公告是给租户看的')
+  assert.equal(canViewPage('user', 'users'), false, '租户看不到用户管理')
+  assert.equal(canViewPage('user', 'ops'), false, '租户看不到运营大盘')
 })
 
 test('admin is unrestricted', () => {
