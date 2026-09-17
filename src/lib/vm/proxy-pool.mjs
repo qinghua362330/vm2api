@@ -151,6 +151,16 @@ export function parseSocks5Line(line) {
   if (!raw || raw.startsWith('#')) return null
   raw = raw.replace(/^['"]|['"]$/g, '').trim()
   try {
+    // http(s) 代理要显式拒绝，不能掉进下面的 user:pass@host:port 分支 —— 那会把
+    // "http" 当成用户名、"//user:pass" 当成密码，存进去一条看着正常、连不上的记录。
+    // （实测多数家宽/住宅代理同一端口同时开 SOCKS5，所以给出去的路是 socks5h。）
+    if (/^https?:\/\//i.test(raw)) {
+      return {
+        __invalid: raw,
+        reason: 'unsupported_scheme',
+        hint: '代理池只支持 socks5；同一端口通常也开 SOCKS5，改成 socks5h://user:pass@host:port 再导入',
+      }
+    }
     if (/^socks5h?:\/\//i.test(raw)) {
       const u = new URL(raw.replace(/^socks5h:\/\//i, 'socks5://'))
       return socks5Record({
@@ -339,7 +349,9 @@ export class ProxyPool {
     for (const parsed of records) {
       if (!parsed || parsed.__invalid || !parsed.host || !parsed.port) {
         const label = parsed?.__invalid || ''
-        if (label) skipped.push({ line: label, reason: 'parse_failed' })
+        if (label) {
+          skipped.push({ line: label, reason: parsed?.reason || 'parse_failed', hint: parsed?.hint || null })
+        }
         continue
       }
       const key = `${parsed.host}:${parsed.port}:${parsed.username || ''}`

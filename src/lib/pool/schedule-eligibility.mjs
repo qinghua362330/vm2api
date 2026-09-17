@@ -74,8 +74,18 @@ export function isCredentialRuntimeBlocked(state, now = Date.now(), vm = null) {
   return false
 }
 
-export function slotHasBoundProxy(vm) {
-  return !!(vm?.proxy_cli_enabled && (vm?.proxy?.url || (vm?.proxy?.host && vm?.proxy?.port)))
+/**
+ * 槽有没有可用的出口。
+ *
+ * `proxy_cli_enabled` 是 Claude 侧的概念：它决定 Go worker / 内核是否**自己**去拨这个
+ * SOCKS5（而不是走槽所在透明网络）。codex 槽不用那套 —— 容器里的 codex CLI 靠
+ * `ALL_PROXY` 环境变量出去，开关摆哪儿都一样。所以按类型判：codex 只看绑定本身，
+ * Claude 仍要求那个开关，否则会出现"配了代理却说没代理"的假阴性。
+ */
+export function slotHasBoundProxy(vm, { requireCliFlag = !isCodexVm(vm) } = {}) {
+  const bound = !!(vm?.proxy?.url || (vm?.proxy?.host && vm?.proxy?.port))
+  if (!bound) return false
+  return requireCliFlag ? vm?.proxy_cli_enabled !== false && !!vm?.proxy_cli_enabled : true
 }
 
 /**

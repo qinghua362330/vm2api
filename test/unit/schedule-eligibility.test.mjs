@@ -357,3 +357,39 @@ test('disk oauth_revoked still blocks even if runtime was cleared', () => {
     true,
   )
 })
+
+test('codex 槽不看 proxy_cli_enabled：CLI 靠 ALL_PROXY 出去', () => {
+  // proxy_cli_enabled 是 Claude 侧的概念（内核是否自己拨 SOCKS5）。codex 槽配了代理
+  // 却因为开关没开被判"没代理"，是假阴性 —— 线上就撞到了这个。
+  const codex = {
+    id: 'vm-03',
+    platform: 'openai',
+    family: 'codex',
+    codex_kernel: true,
+    status: 'running',
+    schedulable: true,
+    proxy_cli_enabled: false,
+    proxy: { id: 'px-1', url: 'socks5h://u:p@38.109.193.59:6023' },
+  }
+  const gate = evaluateSlotGate(codex, { requireKind: 'codex', hasCodexCredential: () => true })
+  assert.equal(gate.ok, true, JSON.stringify(gate))
+  assert.equal(slotHasBoundProxy(codex), true)
+
+  // 真没绑代理仍然要拦
+  const unbound = { ...codex, proxy: null }
+  assert.equal(slotHasBoundProxy(unbound), false)
+  assert.equal(
+    evaluateSlotGate(unbound, { requireKind: 'codex', hasCodexCredential: () => true }).reason,
+    'proxy_required',
+  )
+
+  // Claude 侧保持原样：开关没开就是没代理
+  const claudeVm = {
+    id: 'vm-01',
+    status: 'running',
+    schedulable: true,
+    proxy_cli_enabled: false,
+    proxy: { url: 'socks5h://127.0.0.1:1080' },
+  }
+  assert.equal(slotHasBoundProxy(claudeVm), false)
+})
