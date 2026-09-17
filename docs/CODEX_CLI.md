@@ -168,6 +168,27 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 | `No prompt provided via stdin` | `codex exec … -` 是读 stdin，而 spawn 用了 `'ignore'` |
 | 请求卡 5 分钟无输出 | 透明出口网关从没为 codex 起过，且 `ALL_PROXY` 造成双重代理 → 先 `ensureProxyEgress`，不再注入代理变量 |
 | 客户端收到两条失败帧 | CLI 同时发 `error` 与 `turn.failed`，翻译层去重 |
+| 面板上额度永远 `0% / —`，上游其实回了 62% | `persistCodexQuotaSnapshot` 存的是**已算好的 view**，`summarizeCodexSlot` 读出来又喂回 `buildCodexUsageView`；老实现只认顶层 `primary_used_percent`，把 view 当 extra 解析 → 全 null。`snapshotOf()` 现在显式识别 view/snapshot/extra 三种输入 |
+
+## 额度显示（为什么有时候是"—"）
+
+额度快照存在 `vms/<id>.json` 的 `codex.extra` / `codex.usage` / `codex.reset_credits`，
+上游是 `chatgpt.com/backend-api/wham/usage`（+ `/rate-limit-reset-credits`），经槽自己的
+SOCKS5 出去。面板上三处会显示它：槽详情的额度卡、`5 小时 / 7 天` 两条进度、重置券数量。
+
+刷新时机（不用再手动点「查询重置券」）：
+
+| 时机 | 行为 |
+|---|---|
+| 导入 codex 凭证成功后 | 立即拉一次（`force`） |
+| 槽启动成功后 | 立即拉一次（`force`） |
+| 打开槽详情页 | 顺手拉一次，节流 3 分钟、并发去重、失败静默 |
+
+失败不占节流窗口，下一次请求还会再试；拉取报错只写日志，不影响面板响应。
+
+`null` 和 `0%` 是两件事：`null` 表示**这个套餐没有这个窗口**（Codex 的 7 天-only 套餐就是
+这样），面板显示「5 小时窗口：该套餐没有…」；`0%` 才是"一点没用"。`usedPctOrNull()` 负责
+区分，别再让 `Number(value) || 0` 把它压成 0% 的进度条。
 
 ## 模型清单是账号驱动的
 
