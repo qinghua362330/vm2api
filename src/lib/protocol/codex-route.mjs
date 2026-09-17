@@ -11,6 +11,9 @@ export const DEFAULT_CODEX_ROUTING = Object.freeze({
   enabled: true,
   // 这一跳由谁执行：auto = 有 codex 可执行文件就用真 CLI，否则回退手写 HTTP 内核。
   engine: 'auto',
+  // CLI 跑在哪：默认只在槽容器里（与 Claude 槽同构）。true = 允许没有容器时在宿主执行，
+  // 仅用于开发或旧部署兼容 —— 那会让请求带着宿主身份出去。
+  allow_host_cli: false,
   protocols: {
     'openai.responses': { mode: 'native', enabled: true },
     'openai.chat': { mode: 'convert', enabled: true },
@@ -51,6 +54,7 @@ export function normalizeCodexRouting(raw = {}) {
   return {
     enabled: raw.enabled !== false,
     engine,
+    allow_host_cli: raw.allow_host_cli === true,
     protocols,
     convert: {
       chat_to_codex: raw.convert?.chat_to_codex !== false,

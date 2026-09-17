@@ -364,8 +364,24 @@ export async function handleCodexProtocol({
         },
       })
     }
+    // CLI 必须跑在槽容器里 —— 这是 codex 槽与 Claude 槽对齐的核心：推理在槽内，
+    // hostname/device/文件系统都随槽走。容器没起来时**不静默降级到宿主**：那会让请求
+    // 带着宿主的身份出去，而这正是容器化要消灭的东西。要临时用宿主执行（开发/兼容旧
+    // 部署）必须显式开 routing.codex.allow_host_cli。
+    if (container) {
+      cliRunner = { container, bin: CODEX_BIN_IN_CONTAINER, docker: 'docker' }
+    } else if (codex.allow_host_cli !== true) {
+      stats.errors++
+      logBag.error_code = 'codex_slot_not_running'
+      return json(res, 503, {
+        error: {
+          type: 'api_error',
+          code: 'codex_slot_not_running',
+          message: `Codex 槽容器未运行（${vm.runtime?.container || codexContainerName(vm.id)}）。先启动槽，或显式开启 routing.codex.allow_host_cli 用宿主执行。`,
+        },
+      })
+    }
     cliEnv = prepared.env
-    cliRunner = container ? { container, bin: CODEX_BIN_IN_CONTAINER, docker: 'docker' } : null
   } else {
     writeCodexKernelConfig(projectRoot, vm, { proxyUrl, proxyRequired: true })
     const ready = await ensureCodexKernel(execFor(projectRoot, vm))

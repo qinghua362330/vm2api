@@ -184,6 +184,7 @@
   "codex": {
     "enabled": true,
     "engine": "auto",
+    "allow_host_cli": false,
     "protocols": {
       "openai.responses": { "mode": "native", "enabled": true },
       "openai.chat": { "mode": "convert", "enabled": true },

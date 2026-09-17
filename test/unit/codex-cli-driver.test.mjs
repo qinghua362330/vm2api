@@ -372,7 +372,9 @@ process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tok
         res.headersSent = true
         headers.push(1)
       },
-      routing: { codex: { enabled: true, engine: 'cli' } },
+      // 这条用例走"宿主执行"这条兼容路径（allow_host_cli）：测试环境没有容器。
+      // 不显式打开会 503 codex_slot_not_running —— 那正是默认该有的行为。
+      routing: { codex: { enabled: true, engine: 'cli', allow_host_cli: true } },
       projectRoot: project,
       ops: {
         // 真 CLI 的二进制由测试提供：既验证接线，又不依赖机器上装没装。
@@ -579,6 +581,51 @@ test('没有凭证的 codex 槽不参与选择', async () => {
     const picked = pickCodexVm(project, { headers: {}, apiKeyKind: 'master' })
     assert.equal(picked.error, 'no_codex_slot', JSON.stringify(picked))
     assert.equal(picked.reason, 'no_codex_credential', '没凭证要说清楚是没凭证')
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('槽容器没起来时默认拒绝（不静默降级到宿主身份）', async () => {
+  const { handleCodexProtocol } = await import('../../src/lib/protocol/handle-codex.mjs')
+  const project = tmp()
+  fs.mkdirSync(path.join(project, 'vms', 'vm-codex-01'), { recursive: true })
+  fs.writeFileSync(
+    path.join(project, 'vms', 'vm-codex-01.json'),
+    JSON.stringify({
+      id: 'vm-codex-01',
+      status: 'running',
+      schedulable: true,
+      platform: 'openai',
+      family: 'codex',
+      codex_kernel: true,
+      proxy_cli_enabled: true,
+      proxy: { id: 'proxy-codex-01', url: 'socks5h://127.0.0.1:1082' },
+    }),
+  )
+  fs.writeFileSync(path.join(project, 'vms', 'active.json'), JSON.stringify({ active_vm: 'vm-codex-01' }))
+  fs.writeFileSync(
+    path.join(project, 'vms', 'vm-codex-01', 'codex-credentials.json'),
+    JSON.stringify({ accounts: [{ id: 'a', access_token: 'at', refresh_token: 'rt' }] }),
+  )
+  try {
+    const response = await handleCodexProtocol({
+      req: { method: 'POST', headers: {}, apiKeyKind: 'master' },
+      res: { headersSent: false, write: () => {}, end: () => {} },
+      protocol: 'openai.responses',
+      ctx: { body: { model: 'gpt-5.1-codex', input: 'ping' } },
+      inbound: { stream: true },
+      logBag: {},
+      stats: { requests: 0, errors: 0, by_route: {} },
+      json: (_res, status, payload) => ({ status, body: payload }),
+      writeSSEHeaders: () => {},
+      routing: { codex: { enabled: true, engine: 'cli' } },
+      projectRoot: project,
+      ops: { streamCodexCli: () => assert.fail('must not run the CLI on the host by default') },
+    })
+    assert.equal(response.status, 503)
+    assert.equal(response.body.error.code, 'codex_slot_not_running')
+    assert.match(response.body.error.message, /allow_host_cli/)
   } finally {
     fs.rmSync(project, { recursive: true, force: true })
   }
