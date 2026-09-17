@@ -45,15 +45,17 @@ function rowToDef(row) {
 }
 
 export function normalizeKey(raw) {
-  return String(raw || '')
-    .trim()
-    .toLowerCase()
-    // \p{L}/\p{N} rather than [a-z0-9]: an operator naming an attribute 来源渠道
-    // must get a usable key, not an empty string. ASCII-only would silently
-    // reject every non-Latin name in a Chinese-language console.
-    .replace(/[^\p{L}\p{N}_]+/gu, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40)
+  return (
+    String(raw || '')
+      .trim()
+      .toLowerCase()
+      // \p{L}/\p{N} rather than [a-z0-9]: an operator naming an attribute 来源渠道
+      // must get a usable key, not an empty string. ASCII-only would silently
+      // reject every non-Latin name in a Chinese-language console.
+      .replace(/[^\p{L}\p{N}_]+/gu, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40)
+  )
 }
 
 /**

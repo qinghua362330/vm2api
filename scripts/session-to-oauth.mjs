@@ -84,7 +84,8 @@ const PUBLIC_ERROR_MESSAGES = Object.freeze({
   session_stale_relogin: '登录会话不够新，请重新登录 claude.ai 后再试。',
   authorize_no_code: 'CAI 授权页没有返回授权码，请重新打开授权链接后重试。',
   cloudflare_challenge: '上游触发了 Cloudflare 校验，请更换出口代理后重试。',
-  no_cookie_auth_bin: '本快照未包含 session-to-oauth 转换链，请补充 scripts/session-to-oauth.mjs 与 scripts/session-import-cffi.py。',
+  no_cookie_auth_bin:
+    '本快照未包含 session-to-oauth 转换链，请补充 scripts/session-to-oauth.mjs 与 scripts/session-import-cffi.py。',
   no_cffi_helper: '本快照未包含 session-import-cffi.py，无法完成转换。',
   permission_error: '上游拒绝该会话（permission_error），请确认账号权限。',
   oauth_invalid_grant: '授权已被上游撤销，请重新登录。',
@@ -165,7 +166,10 @@ export function extractOAuthCodeFromRedirect(input) {
 
 function fakeCredential(sessionKey, { scope } = {}) {
   const setupToken = String(scope || '').toLowerCase() === 'inference'
-  const suffix = String(sessionKey).slice(-8).replace(/[^a-zA-Z0-9]/g, '') || '00000000'
+  const suffix =
+    String(sessionKey)
+      .slice(-8)
+      .replace(/[^a-zA-Z0-9]/g, '') || '00000000'
   return {
     source: 'KIN_FAKE_SESSION_OAUTH',
     email: 'fake-oauth@kin.test',

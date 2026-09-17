@@ -216,7 +216,14 @@ test('healthByEgress points at the offending bucket', () => {
 
 test('runAlerts records the event and stamps the rule for cooldown', () => {
   const { monitor } = tmp()
-  const rule = monitor.createRule({ name: '可用率', metric: 'availability', comparator: 'lt', threshold: 0.9, min_samples: 1, cooldown_minutes: 30 })
+  const rule = monitor.createRule({
+    name: '可用率',
+    metric: 'availability',
+    comparator: 'lt',
+    threshold: 0.9,
+    min_samples: 1,
+    cooldown_minutes: 30,
+  })
   monitor.recordProbe({ channelId: 1, egressId: 'px-a', ok: false, error: 'down', now: T0 })
 
   const first = monitor.runAlerts({ now: T0 })

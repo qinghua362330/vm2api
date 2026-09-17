@@ -31,7 +31,8 @@ export const REDACTED = '[redacted]'
 export function redactDeep(value, { depth = 0, maxDepth = 6, maxKeys = 200 } = {}) {
   if (depth > maxDepth) return '[depth-limit]'
   if (value == null) return value
-  if (Array.isArray(value)) return value.slice(0, maxKeys).map((item) => redactDeep(item, { depth: depth + 1, maxDepth, maxKeys }))
+  if (Array.isArray(value))
+    return value.slice(0, maxKeys).map((item) => redactDeep(item, { depth: depth + 1, maxDepth, maxKeys }))
   if (typeof value !== 'object') return value
   const out = {}
   let n = 0
@@ -40,7 +41,11 @@ export function redactDeep(value, { depth = 0, maxDepth = 6, maxKeys = 200 } = {
       out.__truncated__ = true
       break
     }
-    out[key] = SECRET_KEY_RE.test(key) ? (item ? REDACTED : item) : redactDeep(item, { depth: depth + 1, maxDepth, maxKeys })
+    out[key] = SECRET_KEY_RE.test(key)
+      ? item
+        ? REDACTED
+        : item
+      : redactDeep(item, { depth: depth + 1, maxDepth, maxKeys })
   }
   return out
 }

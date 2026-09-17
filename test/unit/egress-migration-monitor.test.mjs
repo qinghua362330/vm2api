@@ -86,7 +86,8 @@ test('the sweep moves a user off a slot whose window is spent', async () => {
   assert.equal(repo.getSlotBinding('u1').slot_id, 'vm-01')
 
   const accountQuota = {
-    canAccept: (accountId) => (accountId === 'vm-01' ? { ok: false, reason: 'quota_5h_cli', detail: { window: '5h' } } : { ok: true }),
+    canAccept: (accountId) =>
+      accountId === 'vm-01' ? { ok: false, reason: 'quota_5h_cli', detail: { window: '5h' } } : { ok: true },
   }
   const monitor = createEgressMigrationMonitor({ projectRoot: root, accountQuota, repo })
   const run = await monitor.runOnce()
@@ -132,7 +133,10 @@ test('a cooldown parks a slot without ending the binding', async () => {
   resolveUserSlot({ userId: 'u1', vms, egressId: 'px-a' }, { repo })
 
   const runtimeRepo = {
-    get: (id) => (id === 'vm-01' ? { status: 'cooldown', cooldown_until: Date.now() + 60_000, cooldown_reason: 'rate_limited' } : null),
+    get: (id) =>
+      id === 'vm-01'
+        ? { status: 'cooldown', cooldown_until: Date.now() + 60_000, cooldown_reason: 'rate_limited' }
+        : null,
   }
   const monitor = createEgressMigrationMonitor({ projectRoot: root, runtimeRepo, repo })
   const run = await monitor.runOnce()

@@ -99,7 +99,12 @@ test('filters ignore blanks and reject missing values', () => {
 
 test('a definition is created with a slugged key and rejects a bad select', () => {
   const { attrs } = tmp()
-  const def = attrs.createDef({ name: '来源渠道', type: 'select', options: ['telegram', 'friend'], show_in_filter: true })
+  const def = attrs.createDef({
+    name: '来源渠道',
+    type: 'select',
+    options: ['telegram', 'friend'],
+    show_in_filter: true,
+  })
   assert.equal(def.key, '来源渠道', 'a non-Latin name still yields a usable key')
   assert.deepEqual(def.options, ['telegram', 'friend'])
   assert.equal(def.show_in_filter, true)
@@ -188,7 +193,11 @@ test('numeric values keep a numeric mirror for range comparisons', () => {
   const rows = db
     .prepare('SELECT user_id, value_num FROM user_attribute_values WHERE attr_id = ? ORDER BY value_num DESC')
     .all(def.id)
-  assert.deepEqual(rows.map((r) => r.user_id), ['u2', 'u1'], 'numeric order, not lexicographic')
+  assert.deepEqual(
+    rows.map((r) => r.user_id),
+    ['u2', 'u1'],
+    'numeric order, not lexicographic',
+  )
 })
 
 test('an empty user id is refused', () => {

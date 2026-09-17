@@ -24,9 +24,7 @@ export class BalanceLedger {
       INSERT INTO balance_ledger (user_id, delta, balance_after, source, ref, notes, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
-    this._listByUser = db.prepare(
-      'SELECT * FROM balance_ledger WHERE user_id = ? ORDER BY id DESC LIMIT ?',
-    )
+    this._listByUser = db.prepare('SELECT * FROM balance_ledger WHERE user_id = ? ORDER BY id DESC LIMIT ?')
     this._listRecent = db.prepare('SELECT * FROM balance_ledger ORDER BY id DESC LIMIT ?')
     this._sumBySource = db.prepare(
       'SELECT source, COUNT(*) AS n, SUM(delta) AS total FROM balance_ledger GROUP BY source',

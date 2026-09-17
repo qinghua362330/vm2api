@@ -66,14 +66,8 @@ test('no caller still derives deployment_environment on its own', () => {
 })
 
 test('the Go sidecar exposes the explicit override field', () => {
-  const cfg = fs.readFileSync(
-    new URL('../../worker/internal/config/config.go', import.meta.url),
-    'utf8',
-  )
-  const ev = fs.readFileSync(
-    new URL('../../worker/internal/telemetry/event.go', import.meta.url),
-    'utf8',
-  )
+  const cfg = fs.readFileSync(new URL('../../worker/internal/config/config.go', import.meta.url), 'utf8')
+  const ev = fs.readFileSync(new URL('../../worker/internal/telemetry/event.go', import.meta.url), 'utf8')
   assert.match(cfg, /DeploymentEnvironment\s+string\s+`json:"deployment_environment"`/)
   assert.match(ev, /strings\.TrimSpace\(id\.DeploymentEnvironment\)/)
   assert.match(ev, /deploy = "unknown-" \+ platform/)

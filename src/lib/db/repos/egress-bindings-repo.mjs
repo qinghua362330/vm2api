@@ -11,14 +11,7 @@
 
 import { getDb, withTransaction } from '../database.mjs'
 
-const EGRESS_COLUMNS = [
-  'user_id',
-  'egress_id',
-  'reason',
-  'bound_by',
-  'bound_at',
-  'updated_at',
-]
+const EGRESS_COLUMNS = ['user_id', 'egress_id', 'reason', 'bound_by', 'bound_at', 'updated_at']
 
 const SLOT_COLUMNS = [
   'user_id',
@@ -51,9 +44,7 @@ export class EgressBindingsRepo {
     this.db = db
     this._getEgress = db.prepare('SELECT * FROM proxies WHERE id = ? AND deleted_at IS NULL')
     this._listEgress = db.prepare('SELECT * FROM proxies WHERE deleted_at IS NULL ORDER BY created_at, id')
-    this._setEgressIdentity = db.prepare(
-      'UPDATE proxies SET kind = ?, identity = ?, updated_at = ? WHERE id = ?',
-    )
+    this._setEgressIdentity = db.prepare('UPDATE proxies SET kind = ?, identity = ?, updated_at = ? WHERE id = ?')
 
     this._getEgressBinding = db.prepare('SELECT * FROM user_egress_bindings WHERE user_id = ?')
     this._listEgressBindings = db.prepare('SELECT * FROM user_egress_bindings ORDER BY user_id')
@@ -75,9 +66,7 @@ export class EgressBindingsRepo {
     this._listBuckets = db.prepare(
       'SELECT * FROM user_egress_buckets WHERE user_id = ? ORDER BY is_primary DESC, egress_id',
     )
-    this._listAllBuckets = db.prepare(
-      'SELECT * FROM user_egress_buckets ORDER BY user_id, is_primary DESC, egress_id',
-    )
+    this._listAllBuckets = db.prepare('SELECT * FROM user_egress_buckets ORDER BY user_id, is_primary DESC, egress_id')
     this._countBucketsByEgress = db.prepare(
       'SELECT egress_id, COUNT(*) AS users FROM user_egress_buckets GROUP BY egress_id',
     )
@@ -92,18 +81,12 @@ export class EgressBindingsRepo {
     )
     this._deleteBucket = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ? AND egress_id = ?')
     this._deleteAllBuckets = db.prepare('DELETE FROM user_egress_buckets WHERE user_id = ?')
-    this._countByUser = db.prepare(
-      'SELECT user_id, COUNT(*) AS buckets FROM user_egress_buckets GROUP BY user_id',
-    )
+    this._countByUser = db.prepare('SELECT user_id, COUNT(*) AS buckets FROM user_egress_buckets GROUP BY user_id')
 
     this._getSlotBinding = db.prepare('SELECT * FROM user_slot_bindings WHERE user_id = ?')
     this._listSlotBindings = db.prepare('SELECT * FROM user_slot_bindings ORDER BY user_id')
-    this._listSlotBindingsByEgress = db.prepare(
-      'SELECT * FROM user_slot_bindings WHERE egress_id = ? ORDER BY user_id',
-    )
-    this._listSlotBindingsBySlot = db.prepare(
-      'SELECT * FROM user_slot_bindings WHERE slot_id = ? ORDER BY user_id',
-    )
+    this._listSlotBindingsByEgress = db.prepare('SELECT * FROM user_slot_bindings WHERE egress_id = ? ORDER BY user_id')
+    this._listSlotBindingsBySlot = db.prepare('SELECT * FROM user_slot_bindings WHERE slot_id = ? ORDER BY user_id')
     this._insertSlotBinding = db.prepare(`
       INSERT OR IGNORE INTO user_slot_bindings (${SLOT_COLUMNS.join(', ')})
       VALUES (${SLOT_COLUMNS.map(() => '?').join(', ')})
@@ -121,9 +104,7 @@ export class EgressBindingsRepo {
       INSERT INTO egress_migrations (user_id, egress_id, from_slot, to_slot, reason, detail, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
-    this._listMigrations = db.prepare(
-      'SELECT * FROM egress_migrations WHERE user_id = ? ORDER BY id DESC LIMIT ?',
-    )
+    this._listMigrations = db.prepare('SELECT * FROM egress_migrations WHERE user_id = ? ORDER BY id DESC LIMIT ?')
     this._listRecentMigrations = db.prepare('SELECT * FROM egress_migrations ORDER BY id DESC LIMIT ?')
   }
 

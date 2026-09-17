@@ -78,9 +78,7 @@ test('detectPublicIp returns the first usable echo answer and never throws', asy
   const ok = await detectPublicIp({
     endpoints: ['https://a.test', 'https://b.test'],
     fetchImpl: async (url) =>
-      url === 'https://a.test'
-        ? { ok: false, text: async () => '' }
-        : { ok: true, text: async () => '198.51.100.4\n' },
+      url === 'https://a.test' ? { ok: false, text: async () => '' } : { ok: true, text: async () => '198.51.100.4\n' },
   })
   assert.deepEqual(ok, { ok: true, ip: '198.51.100.4', source: 'https://b.test' })
 

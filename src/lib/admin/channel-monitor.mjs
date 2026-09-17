@@ -170,11 +170,12 @@ export function evaluateAlerts({ rules = [], healthByChannel = new Map(), now = 
 }
 
 export function alertMessage({ rule, channelId, value }) {
-  const metricLabel = {
-    availability: '可用率',
-    latency_p95: 'P95 延迟',
-    consecutive_failures: '连续失败',
-  }[rule.metric] || rule.metric
+  const metricLabel =
+    {
+      availability: '可用率',
+      latency_p95: 'P95 延迟',
+      consecutive_failures: '连续失败',
+    }[rule.metric] || rule.metric
   const formatted =
     rule.metric === 'availability'
       ? `${(Number(value) * 100).toFixed(1)}%`
@@ -228,7 +229,16 @@ export class ChannelMonitor {
     this._listEvents = db.prepare('SELECT * FROM channel_alert_events ORDER BY id DESC LIMIT ?')
   }
 
-  recordProbe({ channelId = null, egressId, ok, latencyMs = null, statusCode = null, scope = null, error = null, now = Date.now() } = {}) {
+  recordProbe({
+    channelId = null,
+    egressId,
+    ok,
+    latencyMs = null,
+    statusCode = null,
+    scope = null,
+    error = null,
+    now = Date.now(),
+  } = {}) {
     const egress = String(egressId || '').trim()
     if (!egress) return { ok: false, reason: 'egress_required' }
     this._insertProbe.run(
@@ -258,7 +268,8 @@ export class ChannelMonitor {
 
   /** Health per channel over the window, for the console and the rule engine. */
   healthByChannel({ windowMinutes = 30, now = Date.now(), channelIds = null } = {}) {
-    const ids = channelIds || this._distinctChannels.all(this.windowStart(windowMinutes, now)).map((r) => Number(r.channel_id))
+    const ids =
+      channelIds || this._distinctChannels.all(this.windowStart(windowMinutes, now)).map((r) => Number(r.channel_id))
     const out = new Map()
     for (const id of ids) {
       out.set(Number(id), summarizeProbes(this.probes({ channelId: id, windowMinutes, now })))
@@ -290,7 +301,11 @@ export class ChannelMonitor {
     const name = String(input.name || '').trim()
     if (!name) throw new Error('rule name is required')
     const metric = ALERT_METRICS.includes(input.metric) ? input.metric : 'availability'
-    const comparator = ALERT_COMPARATORS.includes(input.comparator) ? input.comparator : metric === 'availability' ? 'lt' : 'gt'
+    const comparator = ALERT_COMPARATORS.includes(input.comparator)
+      ? input.comparator
+      : metric === 'availability'
+        ? 'lt'
+        : 'gt'
     const threshold = Number(input.threshold)
     if (!Number.isFinite(threshold)) throw new Error('threshold is required')
     const stamp = nowIso()

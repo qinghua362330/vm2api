@@ -6,11 +6,7 @@ import path from 'node:path'
 import { PoolScheduler } from '../../src/lib/pool/pool-scheduler.mjs'
 import { createDatabase } from '../../src/lib/db/database.mjs'
 import { EgressBindingsRepo } from '../../src/lib/db/repos/egress-bindings-repo.mjs'
-import {
-  assignUserEgress,
-  resolveUserDispatch,
-  resolveUserSlot,
-} from '../../src/lib/pool/egress-binding.mjs'
+import { assignUserEgress, resolveUserDispatch, resolveUserSlot } from '../../src/lib/pool/egress-binding.mjs'
 
 /**
  * Priority contract: a conversation keeps its credential, the user's bucket set
@@ -273,9 +269,7 @@ test('an existing binding is never reassigned by the dispatch path', () => {
 
 test('dispatch reports the failure but keeps the IP when nothing can serve', () => {
   const { repo } = tmpRepo()
-  const vms = [
-    { id: 'vm-01', proxy: { id: 'px-a' }, schedulable: false, claude: {} },
-  ]
+  const vms = [{ id: 'vm-01', proxy: { id: 'px-a' }, schedulable: false, claude: {} }]
   const resolved = resolveUserDispatch({ userId: 'u1', vms }, { repo })
   assert.equal(resolved.ok, false)
   assert.equal(resolved.reason, 'no_egress_available')

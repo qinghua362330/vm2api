@@ -247,9 +247,7 @@ export class SubscriptionService {
     return this.list().map((sub) => ({
       ...sub,
       window: windowState(sub, now),
-      days_left: sub.expires_at
-        ? Math.max(0, Math.ceil((Date.parse(sub.expires_at) - now) / DAY_MS))
-        : null,
+      days_left: sub.expires_at ? Math.max(0, Math.ceil((Date.parse(sub.expires_at) - now) / DAY_MS)) : null,
     }))
   }
 }

@@ -65,10 +65,7 @@ export function createEgressMigrationMonitor({
         : []
       const hostIdentity = resolveHostIdentity()
       const gates = buildEgressGates({ quota: accountQuota, runtimeRepo })
-      const sweep = autoMigrateExhausted(
-        { vms, hostIdentity, gates, dryRun: config.dry_run },
-        { repo: bindingsRepo() },
-      )
+      const sweep = autoMigrateExhausted({ vms, hostIdentity, gates, dryRun: config.dry_run }, { repo: bindingsRepo() })
       lastRun = {
         at: new Date(nowFn()).toISOString(),
         duration_ms: nowFn() - started,

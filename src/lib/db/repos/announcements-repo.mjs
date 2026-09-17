@@ -49,9 +49,7 @@ export function isVisibleTo(rec, { viewerId = null, viewerRole = 'user', now = D
 export class AnnouncementsRepo {
   constructor(db = getDb()) {
     this.db = db
-    this._list = db.prepare(
-      'SELECT * FROM announcements WHERE deleted_at IS NULL ORDER BY pinned DESC, id DESC',
-    )
+    this._list = db.prepare('SELECT * FROM announcements WHERE deleted_at IS NULL ORDER BY pinned DESC, id DESC')
     this._listLive = db.prepare(
       `SELECT * FROM announcements
         WHERE deleted_at IS NULL AND status = 'published'

@@ -196,8 +196,7 @@ export class PoolScheduler {
     }
     const finalDeadline =
       Number(deadline) ||
-      startedAt +
-        (stickyKey || preferred ? this.config.sticky_wait_timeout_ms : this.config.fallback_wait_timeout_ms)
+      startedAt + (stickyKey || preferred ? this.config.sticky_wait_timeout_ms : this.config.fallback_wait_timeout_ms)
     for (;;) {
       if (signal?.aborted) throw makeAbortError()
       const candidates = await this.eligibleCandidates({

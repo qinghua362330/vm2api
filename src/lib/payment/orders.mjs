@@ -49,7 +49,10 @@ function rowToOrder(row) {
 
 /** Order number: time-ordered so a support conversation can sort by it. */
 export function newOrderNo({ now = Date.now(), randomBytes = crypto.randomBytes } = {}) {
-  const stamp = new Date(now).toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
+  const stamp = new Date(now)
+    .toISOString()
+    .replace(/[-:TZ.]/g, '')
+    .slice(0, 14)
   return `P${stamp}${randomBytes(4).toString('hex').toUpperCase()}`
 }
 
@@ -81,9 +84,7 @@ export class OrderService {
     )
     this._list = db.prepare('SELECT * FROM payment_orders ORDER BY id DESC LIMIT ?')
     this._listByUser = db.prepare('SELECT * FROM payment_orders WHERE user_id = ? ORDER BY id DESC LIMIT ?')
-    this._listByStatus = db.prepare(
-      'SELECT * FROM payment_orders WHERE status = ? ORDER BY id DESC LIMIT ?',
-    )
+    this._listByStatus = db.prepare('SELECT * FROM payment_orders WHERE status = ? ORDER BY id DESC LIMIT ?')
     this._sumByStatus = db.prepare(
       'SELECT status, COUNT(*) AS n, SUM(amount) AS amount, SUM(credit) AS credit FROM payment_orders GROUP BY status',
     )
@@ -155,7 +156,13 @@ export class OrderService {
     if (paidAmount != null && !sameAmount(paidAmount, order.amount)) {
       // Do not settle, and do not silently accept the larger/smaller figure.
       this._markFailed.run('failed', `amount mismatch: paid ${paidAmount} vs order ${order.amount}`, nowIso(now), no)
-      return { ok: false, reason: 'amount_mismatch', expected: order.amount, received: Number(paidAmount), order: this.get(no) }
+      return {
+        ok: false,
+        reason: 'amount_mismatch',
+        expected: order.amount,
+        received: Number(paidAmount),
+        order: this.get(no),
+      }
     }
 
     return withTransaction(this.db, () => {

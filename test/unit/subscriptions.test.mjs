@@ -5,11 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createDatabase } from '../../src/lib/db/database.mjs'
 import { UsersRepo } from '../../src/lib/db/repos/users-repo.mjs'
-import {
-  DAY_MS,
-  SubscriptionService,
-  windowState,
-} from '../../src/lib/billing/subscription-service.mjs'
+import { DAY_MS, SubscriptionService, windowState } from '../../src/lib/billing/subscription-service.mjs'
 
 /**
  * 订阅：一个用户一个有效订阅，授予是延长而不是叠加；日窗口是滚动 24h。

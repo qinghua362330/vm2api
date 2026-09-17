@@ -246,7 +246,8 @@ test('a cooling slot is skipped and the user moves inside the same ip', () => {
   resolveUserSlot({ userId: 'u1', vms, egressId: 'px-a' }, { repo })
 
   const cooling = {
-    cooldown: (slotId) => (slotId === 'vm-1' ? { cooling: true, until: Date.now() + 60_000, reason: 'rate_limited' } : { cooling: false }),
+    cooldown: (slotId) =>
+      slotId === 'vm-1' ? { cooling: true, until: Date.now() + 60_000, reason: 'rate_limited' } : { cooling: false },
   }
   const res = resolveUserSlot({ userId: 'u1', vms, gates: cooling }, { repo })
   assert.equal(res.ok, true)
@@ -291,7 +292,10 @@ test('admin rebind is an explicit, audited ip change', () => {
   assert.equal(res.from, 'px-a')
   assert.equal(res.slotId, 'vm-2')
   assert.equal(repo.getEgressBinding('u1').reason, 'admin')
-  assert.equal(repo.listMigrations({ userId: 'u1' }).some((m) => m.reason === 'admin'), true)
+  assert.equal(
+    repo.listMigrations({ userId: 'u1' }).some((m) => m.reason === 'admin'),
+    true,
+  )
 })
 
 test('sharing report exposes egresses carrying several slots', () => {

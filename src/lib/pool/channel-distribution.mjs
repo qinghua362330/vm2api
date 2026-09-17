@@ -24,7 +24,10 @@ import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
  * The channel a request belongs to, or null when channels are not in play.
  * `apiKeyRecord.channel_id` wins; otherwise the user's first channel.
  */
-export function resolveRequestChannel({ apiKeyRecord = null, userId = null } = {}, { repo = new ChannelsRepo(getDb()) } = {}) {
+export function resolveRequestChannel(
+  { apiKeyRecord = null, userId = null } = {},
+  { repo = new ChannelsRepo(getDb()) } = {},
+) {
   const keyChannel = Number(apiKeyRecord?.channel_id)
   if (Number.isFinite(keyChannel) && keyChannel > 0) {
     const channel = repo.get(keyChannel)
@@ -69,11 +72,7 @@ export function allowedEgressesForRequest(
 
   // A user with no buckets yet has not been granted anything, so the channel is
   // the grant. A user with buckets must satisfy both.
-  const own = buckets.size
-    ? [...buckets]
-    : uid
-      ? bindingsRepo.listBuckets(uid).map((b) => b.egress_id)
-      : []
+  const own = buckets.size ? [...buckets] : uid ? bindingsRepo.listBuckets(uid).map((b) => b.egress_id) : []
 
   if (!own.length) {
     return { allowedEgressIds: channelBuckets, channel, reason: 'channel_only' }

@@ -90,9 +90,7 @@ test('reset destroys home and recreates the same slot without oauth', async () =
         // about the credential being wiped, not about the slot booting. Include
         // the container-runtime case so the suite also passes on hosts without
         // Docker (the reason surfaces as "spawnSync docker ENOENT").
-        /worker binary not found|runtime start failed|docker ENOENT|ENOENT/i.test(
-          rec.schedule_disabled_reason || '',
-        ),
+        /worker binary not found|runtime start failed|docker ENOENT|ENOENT/i.test(rec.schedule_disabled_reason || ''),
     )
     assert.equal(rec.proxy?.url, before.proxy?.url)
     assert.notEqual(rec.fingerprint?.device_id, before.fingerprint?.device_id)

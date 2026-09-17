@@ -58,16 +58,23 @@ test('a daily series is dense — missing days are zeros, not gaps', () => {
 })
 
 test('rows outside the window are ignored, not clamped in', () => {
-  const series = bucketByDay(
-    [{ amount: 99, created_at: new Date(T0 - 30 * DAY_MS).toISOString() }],
-    { days: 3, now: T0, value: (r) => r.amount },
+  const series = bucketByDay([{ amount: 99, created_at: new Date(T0 - 30 * DAY_MS).toISOString() }], {
+    days: 3,
+    now: T0,
+    value: (r) => r.amount,
+  })
+  assert.deepEqual(
+    series.map((p) => p.value),
+    [0, 0, 0],
   )
-  assert.deepEqual(series.map((p) => p.value), [0, 0, 0])
 })
 
 test('a series is ordered oldest to newest', () => {
   const series = bucketByDay([], { days: 3, now: T0 })
-  assert.deepEqual(series.map((p) => p.date), ['2026-05-08', '2026-05-09', '2026-05-10'])
+  assert.deepEqual(
+    series.map((p) => p.date),
+    ['2026-05-08', '2026-05-09', '2026-05-10'],
+  )
 })
 
 test('the default value counts rows rather than summing them', () => {
@@ -123,7 +130,10 @@ test('paid orders land in the revenue series and the totals', () => {
   orders.markPaid({ orderNo: b.order.order_no, paidAmount: 50, now: T0 - 1 * DAY_MS })
 
   const snap = ops.snapshot({ vms: [], days: 5, now: T0 })
-  assert.deepEqual(snap.revenue.series.map((p) => p.value), [0, 0, 100, 50, 0])
+  assert.deepEqual(
+    snap.revenue.series.map((p) => p.value),
+    [0, 0, 100, 50, 0],
+  )
   assert.equal(snap.revenue.d7, 150)
   assert.equal(snap.revenue.all_time, 150, 'a pending order is not revenue')
   assert.equal(snap.orders.pending, 1)
@@ -171,7 +181,10 @@ test('a user holding several buckets is counted as multi-bucket', () => {
 test('the fleet section reflects the vms the scheduler sees', () => {
   const { ops } = tmp()
   const snap = ops.snapshot({
-    vms: [{ id: 'vm-1', schedulable: true }, { id: 'vm-2', schedulable: false }],
+    vms: [
+      { id: 'vm-1', schedulable: true },
+      { id: 'vm-2', schedulable: false },
+    ],
     days: 7,
     now: T0,
   })

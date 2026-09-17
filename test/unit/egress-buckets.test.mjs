@@ -6,11 +6,7 @@ import path from 'node:path'
 import { createDatabase } from '../../src/lib/db/database.mjs'
 import { EgressBindingsRepo } from '../../src/lib/db/repos/egress-bindings-repo.mjs'
 import { StickyRouter } from '../../src/lib/pool/sticky-router.mjs'
-import {
-  resolveUserDispatch,
-  userBucketEgressIds,
-  userBucketSlots,
-} from '../../src/lib/pool/egress-binding.mjs'
+import { resolveUserDispatch, userBucketEgressIds, userBucketSlots } from '../../src/lib/pool/egress-binding.mjs'
 
 /**
  * A user may hold several buckets; a conversation pins to one of them.
@@ -85,10 +81,7 @@ test('bucket slots exclude egresses the user does not hold', () => {
   repo.upsertEgressBinding({ userId: 'u1', egressId: 'px-a' })
   repo.addBucket({ userId: 'u1', egressId: 'px-b' })
 
-  assert.deepEqual(
-    userBucketSlots({ userId: 'u1', vms }, { repo }).sort(),
-    ['vm-01', 'vm-02'],
-  )
+  assert.deepEqual(userBucketSlots({ userId: 'u1', vms }, { repo }).sort(), ['vm-01', 'vm-02'])
   assert.deepEqual(userBucketSlots({ userId: 'nobody', vms }, { repo }), [])
 })
 

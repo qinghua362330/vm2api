@@ -38,7 +38,10 @@ export function dayKey(iso) {
 // Option names are `value` / `at` on purpose: `valueOf`, `toString` and
 // `constructor` are inherited by every plain object, so a destructuring default
 // for those names never fires and you silently get Object.prototype.valueOf.
-export function bucketByDay(rows = [], { days = 30, now = Date.now(), value = () => 1, at = (r) => r.created_at } = {}) {
+export function bucketByDay(
+  rows = [],
+  { days = 30, now = Date.now(), value = () => 1, at = (r) => r.created_at } = {},
+) {
   const span = Math.max(1, Number(days) || 30)
   const buckets = new Map()
   for (let i = span - 1; i >= 0; i--) {
@@ -114,12 +117,19 @@ export class OpsDashboard {
     let paidOrders = []
     try {
       paidOrders = this.db
-        .prepare("SELECT order_no, amount, credit, paid_at, created_at FROM payment_orders WHERE status = 'paid' AND created_at >= ?")
+        .prepare(
+          "SELECT order_no, amount, credit, paid_at, created_at FROM payment_orders WHERE status = 'paid' AND created_at >= ?",
+        )
         .all(since(days))
     } catch {
       paidOrders = []
     }
-    const revenueSeries = bucketByDay(paidOrders, { days, now, value: (r) => r.amount, at: (r) => r.paid_at || r.created_at })
+    const revenueSeries = bucketByDay(paidOrders, {
+      days,
+      now,
+      value: (r) => r.amount,
+      at: (r) => r.paid_at || r.created_at,
+    })
     const d7 = tailSum(revenueSeries, 7)
     const prev7 = tailSum(revenueSeries.slice(0, -7), 7)
     const d30 = tailSum(revenueSeries, 30)
@@ -133,8 +143,18 @@ export class OpsDashboard {
 
     // ── 用户 ─────────────────────────────────────────────────────────────────
     const usersTotal = scalar(this.db, 'SELECT COUNT(*) FROM users WHERE deleted_at IS NULL', [], 0)
-    const usersActive = scalar(this.db, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND status = 'active'", [], 0)
-    const usersNew7 = scalar(this.db, 'SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND created_at >= ?', [since(7)], 0)
+    const usersActive = scalar(
+      this.db,
+      "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND status = 'active'",
+      [],
+      0,
+    )
+    const usersNew7 = scalar(
+      this.db,
+      'SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND created_at >= ?',
+      [since(7)],
+      0,
+    )
     const subsActive = scalar(this.db, "SELECT COUNT(*) FROM subscriptions WHERE status = 'active'", [], 0)
     const bucketsByUser = this.bindings.countBucketsByUser()
     const multiBucket = Object.values(bucketsByUser).filter((n) => n > 1).length
@@ -143,13 +163,20 @@ export class OpsDashboard {
     let usageRows = []
     try {
       usageRows = this.db
-        .prepare('SELECT created_at, total_cost, actual_cost, input_tokens, output_tokens FROM usage_logs WHERE created_at >= ?')
+        .prepare(
+          'SELECT created_at, total_cost, actual_cost, input_tokens, output_tokens FROM usage_logs WHERE created_at >= ?',
+        )
         .all(since(days))
     } catch {
       usageRows = []
     }
     const usageSeries = bucketByDay(usageRows, { days, now, value: () => 1, at: (r) => r.created_at })
-    const costSeries = bucketByDay(usageRows, { days, now, value: (r) => r.actual_cost ?? r.total_cost, at: (r) => r.created_at })
+    const costSeries = bucketByDay(usageRows, {
+      days,
+      now,
+      value: (r) => r.actual_cost ?? r.total_cost,
+      at: (r) => r.created_at,
+    })
     const tokens = usageRows.reduce(
       (acc, row) => {
         acc.input += Number(row.input_tokens) || 0
@@ -173,12 +200,7 @@ export class OpsDashboard {
     const slots = vms.length
     const schedulable = vms.filter((v) => v.schedulable !== false).length
     const shared = this.bindings.listAllBuckets().length
-    const migrations7d = scalar(
-      this.db,
-      'SELECT COUNT(*) FROM egress_migrations WHERE created_at >= ?',
-      [since(7)],
-      0,
-    )
+    const migrations7d = scalar(this.db, 'SELECT COUNT(*) FROM egress_migrations WHERE created_at >= ?', [since(7)], 0)
     const failovers7d = scalar(
       this.db,
       "SELECT COUNT(*) FROM egress_migrations WHERE created_at >= ? AND reason IN ('egress_failover','direct_fallback')",
@@ -209,7 +231,13 @@ export class OpsDashboard {
         consumed_30d: Math.abs(Number(ledgerTotals.usage?.total || 0)),
         adjusted_30d: Number(ledgerTotals.admin?.total || 0),
       },
-      users: { total: usersTotal, active: usersActive, new_7d: usersNew7, with_subscription: subsActive, multi_bucket: multiBucket },
+      users: {
+        total: usersTotal,
+        active: usersActive,
+        new_7d: usersNew7,
+        with_subscription: subsActive,
+        multi_bucket: multiBucket,
+      },
       orders: {
         pending: Number(orderCounts.pending?.count || 0),
         paid_30d: Number(orderCounts.paid?.count || 0),

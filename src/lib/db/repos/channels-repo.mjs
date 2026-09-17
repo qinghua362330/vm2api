@@ -69,7 +69,9 @@ export class ChannelsRepo {
     this._listBuckets = db.prepare('SELECT egress_id FROM channel_buckets WHERE channel_id = ? ORDER BY egress_id')
     this._listAllBuckets = db.prepare('SELECT channel_id, egress_id FROM channel_buckets')
     this._channelOfBucket = db.prepare('SELECT channel_id FROM channel_buckets WHERE egress_id = ?')
-    this._insertBucket = db.prepare('INSERT OR IGNORE INTO channel_buckets (channel_id, egress_id, created_at) VALUES (?, ?, ?)')
+    this._insertBucket = db.prepare(
+      'INSERT OR IGNORE INTO channel_buckets (channel_id, egress_id, created_at) VALUES (?, ?, ?)',
+    )
     this._deleteBucket = db.prepare('DELETE FROM channel_buckets WHERE channel_id = ? AND egress_id = ?')
     this._clearBuckets = db.prepare('DELETE FROM channel_buckets WHERE channel_id = ?')
 
@@ -83,7 +85,9 @@ export class ChannelsRepo {
 
     this._listUsers = db.prepare('SELECT user_id FROM channel_users WHERE channel_id = ? ORDER BY user_id')
     this._channelsOfUser = db.prepare('SELECT channel_id FROM channel_users WHERE user_id = ?')
-    this._insertUser = db.prepare('INSERT OR IGNORE INTO channel_users (channel_id, user_id, created_at) VALUES (?, ?, ?)')
+    this._insertUser = db.prepare(
+      'INSERT OR IGNORE INTO channel_users (channel_id, user_id, created_at) VALUES (?, ?, ?)',
+    )
     this._deleteUser = db.prepare('DELETE FROM channel_users WHERE channel_id = ? AND user_id = ?')
     this._clearUsers = db.prepare('DELETE FROM channel_users WHERE channel_id = ?')
   }

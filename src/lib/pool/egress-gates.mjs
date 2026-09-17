@@ -69,7 +69,12 @@ export function quotaGate(quota, { accountIdForSlot = defaultAccountIdForSlot } 
 }
 
 /** Build both gates from live pool objects. Missing pieces are simply omitted. */
-export function buildEgressGates({ quota = null, runtimeRepo = null, accountIdForSlot = defaultAccountIdForSlot, now } = {}) {
+export function buildEgressGates({
+  quota = null,
+  runtimeRepo = null,
+  accountIdForSlot = defaultAccountIdForSlot,
+  now,
+} = {}) {
   const gates = {}
   const cd = cooldownGate(runtimeRepo, now ? { accountIdForSlot, now } : { accountIdForSlot })
   if (cd) gates.cooldown = cd
@@ -79,9 +84,14 @@ export function buildEgressGates({ quota = null, runtimeRepo = null, accountIdFo
 }
 
 /** Put a slot into a timed cooldown, the way the scheduler already parks accounts. */
-export function coolSlot(
-  { slotId, vm = {}, minutes = 5, reason = 'quota_exhausted', runtimeRepo, accountIdForSlot = defaultAccountIdForSlot } = {},
-) {
+export function coolSlot({
+  slotId,
+  vm = {},
+  minutes = 5,
+  reason = 'quota_exhausted',
+  runtimeRepo,
+  accountIdForSlot = defaultAccountIdForSlot,
+} = {}) {
   if (!runtimeRepo?.markCooldown) return { ok: false, reason: 'runtime_repo_required' }
   const accountId = accountIdForSlot(vm) || String(slotId || '').trim()
   if (!accountId) return { ok: false, reason: 'account_required' }

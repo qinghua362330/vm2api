@@ -43,12 +43,8 @@ export class RedeemService {
       INSERT INTO redeem_redemptions (code_id, code, user_id, value, type, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `)
-    this._redemptionsByUser = db.prepare(
-      'SELECT * FROM redeem_redemptions WHERE user_id = ? ORDER BY id DESC LIMIT ?',
-    )
-    this._redemptionsByCode = db.prepare(
-      'SELECT * FROM redeem_redemptions WHERE code_id = ? ORDER BY id DESC LIMIT ?',
-    )
+    this._redemptionsByUser = db.prepare('SELECT * FROM redeem_redemptions WHERE user_id = ? ORDER BY id DESC LIMIT ?')
+    this._redemptionsByCode = db.prepare('SELECT * FROM redeem_redemptions WHERE code_id = ? ORDER BY id DESC LIMIT ?')
     this._countRedeemed = db.prepare('SELECT COUNT(*) AS n FROM redeem_redemptions WHERE code_id = ?')
     this._byId = db.prepare('SELECT * FROM redeem_codes WHERE id = ?')
     this._markCount = db.prepare(`
@@ -131,7 +127,9 @@ export class RedeemService {
    * @returns {{ok:boolean, reason?:string, applied?:object}}
    */
   redeem({ code, userId, subscriptionDays = null } = {}) {
-    const raw = String(code || '').trim().toUpperCase()
+    const raw = String(code || '')
+      .trim()
+      .toUpperCase()
     const uid = String(userId || '').trim()
     if (!raw) return { ok: false, reason: 'code_required' }
     if (!uid) return { ok: false, reason: 'user_required' }

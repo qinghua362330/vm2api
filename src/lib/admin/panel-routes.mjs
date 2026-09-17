@@ -31,12 +31,7 @@ import { BalanceLedger } from '../billing/balance-ledger.mjs'
 import { RedeemService } from '../billing/redeem-service.mjs'
 import { SubscriptionService } from '../billing/subscription-service.mjs'
 import { OrderService } from '../payment/orders.mjs'
-import {
-  PaymentConfigStore,
-  buildEasypayRedirect,
-  publicPaymentConfig,
-  usableChannels,
-} from '../payment/config.mjs'
+import { PaymentConfigStore, buildEasypayRedirect, publicPaymentConfig, usableChannels } from '../payment/config.mjs'
 import { easypaySign } from '../payment/sign.mjs'
 import { AnnouncementsRepo } from '../db/repos/announcements-repo.mjs'
 import {
@@ -790,7 +785,11 @@ export function createPanelHandler(ctx) {
         }
         if (req.method === 'GET' && p === '/api/panel/payments/orders') {
           if (!admin) {
-            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+            return json(
+              res,
+              403,
+              makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }),
+            )
           }
           const status = String(url.searchParams.get('status') || '').trim() || null
           return json(
@@ -804,7 +803,11 @@ export function createPanelHandler(ctx) {
         }
         if (req.method === 'GET' && p === '/api/panel/payments/config') {
           if (!admin) {
-            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+            return json(
+              res,
+              403,
+              makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }),
+            )
           }
           return json(
             res,
@@ -814,18 +817,30 @@ export function createPanelHandler(ctx) {
         }
         if ((req.method === 'PUT' || req.method === 'PATCH') && p === '/api/panel/payments/config') {
           if (!admin) {
-            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+            return json(
+              res,
+              403,
+              makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }),
+            )
           }
           const body = await readBody(req, 128 * 1024).catch(() => ({}))
           const saved = store.set(body)
           // detail is the patch only; AuditLog turns every secret field into [redacted].
           audit(req, AUDIT_ACTIONS.paymentConfig, { targetType: 'payment', targetId: 'config', detail: body })
-          return json(res, 200, panel.ok({ config: publicPaymentConfig(saved), usable_channels: usableChannels(saved) }))
+          return json(
+            res,
+            200,
+            panel.ok({ config: publicPaymentConfig(saved), usable_channels: usableChannels(saved) }),
+          )
         }
         const confirm = p.match(/^\/api\/panel\/payments\/orders\/([^/]+)\/confirm$/)
         if (confirm && req.method === 'POST') {
           if (!admin) {
-            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+            return json(
+              res,
+              403,
+              makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }),
+            )
           }
           const orderNo = decodeURIComponent(confirm[1])
           const result = orders.markPaid({
@@ -854,7 +869,11 @@ export function createPanelHandler(ctx) {
         if (req.method === 'GET' && byUser) {
           const uid = decodeURIComponent(byUser[1])
           if (!admin && normalizeOwnerId(uid) !== normalizeOwnerId(req.panelUserId)) {
-            return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'own subscription only' }))
+            return json(
+              res,
+              403,
+              makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'own subscription only' }),
+            )
           }
           return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
         }
@@ -919,7 +938,10 @@ export function createPanelHandler(ctx) {
             audit(req, 'user_attribute.create', { targetType: 'attribute', targetId: def.id, detail: body })
             return json(res, 200, panel.ok({ attribute: def }))
           } catch (error) {
-            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_attribute' } })
+            return json(res, 400, {
+              ok: false,
+              error: { message: String(error?.message || error), code: 'invalid_attribute' },
+            })
           }
         }
         const attrId = p.match(/^\/api\/panel\/user-attributes\/(\d+)$/)
@@ -932,7 +954,10 @@ export function createPanelHandler(ctx) {
               audit(req, 'user_attribute.update', { targetType: 'attribute', targetId: id, detail: body })
               return json(res, 200, panel.ok({ attribute: def }))
             } catch (error) {
-              return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_attribute' } })
+              return json(res, 400, {
+                ok: false,
+                error: { message: String(error?.message || error), code: 'invalid_attribute' },
+              })
             }
           }
           if (req.method === 'DELETE') {
@@ -1015,7 +1040,10 @@ export function createPanelHandler(ctx) {
             audit(req, 'channel_monitor.create_rule', { targetType: 'alert_rule', targetId: rule.id, detail: body })
             return json(res, 200, panel.ok({ rule }))
           } catch (error) {
-            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_rule' } })
+            return json(res, 400, {
+              ok: false,
+              error: { message: String(error?.message || error), code: 'invalid_rule' },
+            })
           }
         }
         const ruleId = p.match(/^\/api\/panel\/channel-monitor\/rules\/(\d+)$/)
@@ -1072,7 +1100,13 @@ export function createPanelHandler(ctx) {
             res,
             200,
             panel.ok({
-              entries: logs.list({ action, actor, targetType, targetId, limit: Number(url.searchParams.get('limit')) || 200 }),
+              entries: logs.list({
+                action,
+                actor,
+                targetType,
+                targetId,
+                limit: Number(url.searchParams.get('limit')) || 200,
+              }),
               stats: logs.stats(),
             }),
           )
@@ -1143,8 +1177,19 @@ export function createPanelHandler(ctx) {
           const amount = Number(body.amount) || 0
           const result =
             amount >= 0
-              ? ledger.credit({ userId: body.user_id, amount, source: 'admin', notes: body.notes || `by ${ident.username || 'admin'}` })
-              : ledger.debit({ userId: body.user_id, amount: Math.abs(amount), source: 'admin', notes: body.notes || `by ${ident.username || 'admin'}`, allowNegative: body.allow_negative === true })
+              ? ledger.credit({
+                  userId: body.user_id,
+                  amount,
+                  source: 'admin',
+                  notes: body.notes || `by ${ident.username || 'admin'}`,
+                })
+              : ledger.debit({
+                  userId: body.user_id,
+                  amount: Math.abs(amount),
+                  source: 'admin',
+                  notes: body.notes || `by ${ident.username || 'admin'}`,
+                  allowNegative: body.allow_negative === true,
+                })
           audit(req, AUDIT_ACTIONS.balanceAdjust, {
             targetType: 'user',
             targetId: body.user_id,
@@ -1184,7 +1229,10 @@ export function createPanelHandler(ctx) {
             })
             return json(res, 200, panel.ok({ created: created.length, codes: created.map((c) => c.code) }))
           } catch (error) {
-            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_redeem_batch' } })
+            return json(res, 400, {
+              ok: false,
+              error: { message: String(error?.message || error), code: 'invalid_redeem_batch' },
+            })
           }
         }
         const redeemId = p.match(/^\/api\/panel\/redeem\/(\d+)$/)
@@ -1249,7 +1297,10 @@ export function createPanelHandler(ctx) {
             })
             return json(res, 200, panel.ok({ announcement: created }))
           } catch (error) {
-            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_announcement' } })
+            return json(res, 400, {
+              ok: false,
+              error: { message: String(error?.message || error), code: 'invalid_announcement' },
+            })
           }
         }
         const annId = p.match(/^\/api\/panel\/announcements\/(\d+)$/)
@@ -1292,7 +1343,10 @@ export function createPanelHandler(ctx) {
             })
             return json(res, 200, panel.ok({ channel }))
           } catch (error) {
-            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_channel' } })
+            return json(res, 400, {
+              ok: false,
+              error: { message: String(error?.message || error), code: 'invalid_channel' },
+            })
           }
         }
 
@@ -1402,9 +1456,15 @@ export function createPanelHandler(ctx) {
 
         if (req.method === 'GET' && p === '/api/panel/users') {
           const q = url.searchParams
-          const search = String(q.get('search') || '').trim().toLowerCase()
-          const role = String(q.get('role') || '').trim().toLowerCase()
-          const status = String(q.get('status') || '').trim().toLowerCase()
+          const search = String(q.get('search') || '')
+            .trim()
+            .toLowerCase()
+          const role = String(q.get('role') || '')
+            .trim()
+            .toLowerCase()
+          const status = String(q.get('status') || '')
+            .trim()
+            .toLowerCase()
           const page = Math.max(1, Number(q.get('page')) || 1)
           const pageSize = Math.min(200, Math.max(1, Number(q.get('page_size')) || 20))
           const sortBy = String(q.get('sort_by') || 'created_at')
@@ -1426,7 +1486,11 @@ export function createPanelHandler(ctx) {
           }))
           if (search) {
             rows = rows.filter((r) =>
-              [r.username, r.email, r.id, r.notes].some((v) => String(v || '').toLowerCase().includes(search)),
+              [r.username, r.email, r.id, r.notes].some((v) =>
+                String(v || '')
+                  .toLowerCase()
+                  .includes(search),
+              ),
             )
           }
           if (role) rows = rows.filter((r) => String(r.role || '').toLowerCase() === role)
@@ -1509,7 +1573,10 @@ export function createPanelHandler(ctx) {
             }
             return json(res, 200, panel.ok({ user: publicUserView(rec), attributes: attributeResult }))
           } catch (error) {
-            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_user' } })
+            return json(res, 400, {
+              ok: false,
+              error: { message: String(error?.message || error), code: 'invalid_user' },
+            })
           }
         }
 

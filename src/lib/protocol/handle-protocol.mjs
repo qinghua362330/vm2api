@@ -152,9 +152,11 @@ export function createHandleProtocol(deps) {
       })
       // 渠道分发: the channel bounds which buckets this request may consume.
       // It never picks an account — the bucket/session resolver below does that.
-      const channelScope = allowedEgressesForRequest(
-        { apiKeyRecord: req.apiKeyRecord, userId, userBucketEgressIds: resolved?.allowedEgressIds || [] },
-      )
+      const channelScope = allowedEgressesForRequest({
+        apiKeyRecord: req.apiKeyRecord,
+        userId,
+        userBucketEgressIds: resolved?.allowedEgressIds || [],
+      })
       const allowed = channelScope.allowedEgressIds
       if (Array.isArray(allowed) && !allowed.length) {
         // The channel can serve nothing for this user. Say so instead of quietly

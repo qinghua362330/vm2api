@@ -280,10 +280,7 @@ test('the easypay redirect carries a sign over the same params', () => {
     channels: { easypay: { pid: '1001', key: 'k', submit_url: 'https://pay.test/submit.php' } },
   }
   const order = { order_no: 'P1', amount: 10 }
-  const sign = easypaySign(
-    { pid: '1001', out_trade_no: 'P1', money: '10.00', name: '充值 10' },
-    'k',
-  )
+  const sign = easypaySign({ pid: '1001', out_trade_no: 'P1', money: '10.00', name: '充值 10' }, 'k')
   const url = buildEasypayRedirect({ order, config, notifyUrl: 'https://n.test', returnUrl: 'https://r.test', sign })
   assert.match(url, /^https:\/\/pay\.test\/submit\.php\?/)
   assert.match(url, /out_trade_no=P1/)

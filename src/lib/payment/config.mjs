@@ -61,7 +61,9 @@ export function mergePaymentConfig(previous = {}, patch = {}) {
   if (patch.enabled != null) next.enabled = patch.enabled === true
   if (patch.order_ttl_minutes != null) {
     const ttl = Number(patch.order_ttl_minutes)
-    next.order_ttl_minutes = Number.isFinite(ttl) ? Math.min(24 * 60, Math.max(1, Math.round(ttl))) : base.order_ttl_minutes
+    next.order_ttl_minutes = Number.isFinite(ttl)
+      ? Math.min(24 * 60, Math.max(1, Math.round(ttl)))
+      : base.order_ttl_minutes
   }
   if (patch.min_amount != null) {
     const min = Number(patch.min_amount)
