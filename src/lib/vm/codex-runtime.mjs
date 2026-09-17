@@ -181,6 +181,17 @@ export function startCodexSlotRuntime(
     }
   }
 
+  // 运行目录：kernel 的 config 与 socket 都住这儿，宿主与容器通过 /run/kin 共享。
+  // 不挂它，容器里的 kernel 连自己的配置都读不到（实测报 "config: No such file or
+  // directory"），Node 侧也就永远等不到那个 socket。所有权给槽的 uid，否则容器内
+  // 进程建不了 socket。
+  const runDir = path.join(projectRoot, 'vms', vm.id, 'run')
+  fs.mkdirSync(runDir, { recursive: true, mode: 0o700 })
+  try {
+    const uid = Number(codexRuntimeUser(vm).split(':')[0])
+    fs.chownSync(runDir, uid, Number(GID))
+    fs.chmodSync(runDir, 0o700)
+  } catch {}
   const machineIdFile = ensureGuestMachineIdFile(projectRoot, vm)
   const machineMounts = machineIdFile
     ? ['-v', `${machineIdFile}:/etc/machine-id:ro`, '-v', `${machineIdFile}:/var/lib/dbus/machine-id:ro`]
@@ -231,6 +242,10 @@ export function startCodexSlotRuntime(
     // kernel 二进制同理：存在才挂（与 Claude 的 kin-kernel 挂载条件一致），
     // 挂上之后 kernel 就在槽里跑，配置/socket 经 /run/kin 共享
     ...(kernelBin ? ['-v', `${kernelBin}:${CODEX_KERNEL_BIN_IN_CONTAINER}:ro`] : []),
+    // 配置与 socket 的共享目录：kernel 读 /run/kin/codex-kernel.json、建
+    // /run/kin/codex-kernel.sock，宿主侧看到的就是 vms/<id>/run 下的同名文件
+    '-v',
+    `${runDir}:/run/kin`,
     ...machineMounts,
     '-e',
     `CODEX_HOME=${CODEX_HOME_IN_CONTAINER}`,

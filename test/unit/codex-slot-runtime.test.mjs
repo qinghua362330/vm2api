@@ -191,6 +191,9 @@ test('启动 codex 槽：参数与 Claude 槽逐条对齐，挂的是 codex 的�
     // codex 特有的挂载：一槽一份 CODEX_HOME + 只读 CLI
     assert.match(joined, new RegExp(`-v [^ ]*codex-home:${CODEX_HOME_IN_CONTAINER}`))
     assert.match(joined, new RegExp(`-v ${bin}:${CODEX_BIN_IN_CONTAINER}:ro`))
+    // 运行目录必须挂上：kernel 的 config 与 socket 都在这儿，漏了它容器里的 kernel
+    // 会报 "config: No such file or directory"，而 Node 侧只会看到 health_timeout
+    assert.match(joined, new RegExp(`-v [^ ]*vms/vm-7/run:/run/kin`))
     assert.match(joined, new RegExp(`-e CODEX_HOME=${CODEX_HOME_IN_CONTAINER}`))
     // 出口走槽绑定的代理
     assert.match(joined, /-e ALL_PROXY=socks5h:\/\/127\.0\.0\.1:1087/)
@@ -413,3 +416,34 @@ function seedSlotHomeFor(project, id) {
   fs.writeFileSync(path.join(home, 'history.jsonl'), '{"old":true}\n')
   return home
 }
+
+test('容器内 kernel 起不来时，把它的报错带回来（docker exec -d 会吞掉输出）', async () => {
+  const { ensureCodexKernel, writeCodexKernelConfig } = await import(
+    '../../src/lib/transport/codex-kernel-supervisor.mjs'
+  )
+  const project = tmp()
+  try {
+    const { vm } = codexSlot(project)
+    writeCodexKernelConfig(project, vm, { inContainer: true })
+    const exec = { vmId: vm.id, vm, homeDir: path.join(project, 'vms', vm.id, 'codex-home') }
+    const probed = []
+    const result = await ensureCodexKernel(exec, {
+      timeoutMs: 150,
+      container: 'kin-7',
+      ops: {
+        dockerExec: () => ({ ok: true }),
+        dockerProbe: (_container, argv) => {
+          probed.push(argv)
+          return { ok: false, output: 'kin-codex-kernel config: No such file or directory (os error 2)' }
+        },
+      },
+    })
+    assert.equal(result.ok, false)
+    assert.equal(result.reason, 'health_timeout')
+    // 排障关键：错误文本要能直接指出原因，而不是只回一个 timeout
+    assert.match(result.error, /No such file or directory/)
+    assert.equal(probed.length, 1, '超时后应前台探一次')
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})

@@ -120,6 +120,15 @@ export async function ensureCodexKernel(exec, { timeoutMs = 8000, container = nu
       }
     }
     const ready = await waitForHealth(exec, timeoutMs)
+    if (!ready.ok) {
+      // `docker exec -d` 把进程的输出丢掉了，只回一个 health_timeout 没法查。
+      // 超时就前台再跑一次，把它真正报的错（缺配置 / 读不到凭证 / 端口占用）带回去。
+      const probe = (ops.dockerProbe || dockerProbe)(target, [
+        CODEX_KERNEL_BIN_IN_CONTAINER,
+        CODEX_KERNEL_CONFIG_IN_CONTAINER,
+      ])
+      if (probe?.output) ready.error = probe.output
+    }
     return { ...ready, started_in: 'container', container: target }
   }
 
@@ -138,6 +147,21 @@ export async function ensureCodexKernel(exec, { timeoutMs = 8000, container = nu
   starts.set(exec.vmId, child)
   const ready = await waitForHealth(exec, timeoutMs)
   return { ...ready, started_in: 'host' }
+}
+
+/** 前台跑一次 kernel，只为拿到它的报错文本（2s 足够它报出配置/凭证问题）。 */
+function dockerProbe(container, argv) {
+  try {
+    execFileSync('docker', ['exec', String(container), ...argv.map(String)], {
+      encoding: 'utf8',
+      timeout: 2500,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return { ok: true, output: '' }
+  } catch (error) {
+    const out = `${error?.stderr || ''}${error?.stdout || ''}${error?.message || ''}`.trim()
+    return { ok: false, output: out.slice(0, 500) }
+  }
 }
 
 /** `docker exec -d`：容器内的常驻进程（与 kin-worker telemetry 同一种起法）。 */
