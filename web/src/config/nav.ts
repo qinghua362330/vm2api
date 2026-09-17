@@ -93,31 +93,38 @@ export const NAV_ITEMS: {
   url: string
   icon: typeof LayoutDashboard
 }[] = [
+  // 顺序就是操作顺序：先备出口，再开槽，再导凭证，然后才是渠道/用户/账。
+  // 侧边栏分组（components/layout/sidebar-data.ts）按同一顺序渲染。
   { id: 'overview', url: '/overview', icon: LayoutDashboard },
-  { id: 'cluster', url: '/cluster', icon: LayoutGrid },
+  // 接入：一条 SOCKS5 = 一个出口 IP；槽必须绑着出口才能起；凭证进槽
+  { id: 'proxies', url: '/proxies', icon: Shield },
   { id: 'vm', url: '/vm', icon: Monitor },
   { id: 'import', url: '/import', icon: Download },
-  { id: 'usage', url: '/usage', icon: LineChart },
-  { id: 'billing', url: '/billing', icon: LineChart },
-  { id: 'proxies', url: '/proxies', icon: Shield },
+  { id: 'cluster', url: '/cluster', icon: LayoutGrid },
+  // 分发：渠道挑桶、出口绑定决定用户落在哪个 IP、用户是最终主体
+  { id: 'channels', url: '/channels', icon: Layers },
   { id: 'egress', url: '/egress', icon: Network },
   { id: 'users', url: '/users', icon: Users },
-  { id: 'channels', url: '/channels', icon: Layers },
-  { id: 'redeem', url: '/redeem', icon: Ticket },
-  { id: 'subscriptions', url: '/subscriptions', icon: CalendarClock },
-  { id: 'announcements', url: '/announcements', icon: Megaphone },
-  { id: 'payments', url: '/payments', icon: CreditCard },
-  { id: 'wallet', url: '/wallet', icon: Wallet },
-  { id: 'ledger', url: '/ledger', icon: Receipt },
-  { id: 'audit', url: '/audit', icon: ShieldCheck },
+  // 运营
+  { id: 'usage', url: '/usage', icon: LineChart },
+  { id: 'billing', url: '/billing', icon: LineChart },
   { id: 'channel-monitor', url: '/channel-monitor', icon: Activity },
   { id: 'ops', url: '/ops', icon: TrendingUp },
+  { id: 'audit', url: '/audit', icon: ShieldCheck },
+  { id: 'logs', url: '/logs', icon: ScrollText },
+  { id: 'announcements', url: '/announcements', icon: Megaphone },
+  // 账
+  { id: 'redeem', url: '/redeem', icon: Ticket },
+  { id: 'subscriptions', url: '/subscriptions', icon: CalendarClock },
+  { id: 'payments', url: '/payments', icon: CreditCard },
+  { id: 'ledger', url: '/ledger', icon: Receipt },
+  { id: 'wallet', url: '/wallet', icon: Wallet },
+  // 配置
   { id: 'models', url: '/models', icon: List },
-  { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },
   { id: 'keys', url: '/keys', icon: KeyRound },
-  { id: 'logs', url: '/logs', icon: ScrollText },
   { id: 'database', url: '/database', icon: Database },
   { id: 'settings', url: '/settings/sticky', icon: Settings },
+  { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'wrap', url: '/wrap', icon: Puzzle },
 ]

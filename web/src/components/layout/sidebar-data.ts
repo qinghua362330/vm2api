@@ -15,25 +15,43 @@ import type { SidebarData, NavGroup } from './types'
  */
 
 const GROUP_TITLES: Record<string, string> = {
+  // 顺序即操作顺序：接入 → 分发 → 运营 → 账 → 配置。
+  // 新页面必须在这里出现，否则会掉进「其他」——那正是它上次变成一锅乱炖的原因。
   overview: '总览',
-  cluster: '资源',
-  vm: '资源',
-  import: '资源',
+
+  proxies: '接入',
+  vm: '接入',
+  import: '接入',
+  cluster: '接入',
+
+  channels: '分发',
+  egress: '分发',
+  users: '分发',
+
   usage: '运营',
   billing: '运营',
-  proxies: '资源',
-  egress: '资源',
+  'channel-monitor': '运营',
+  ops: '运营',
+  audit: '运营',
+  logs: '运营',
+  announcements: '运营',
+
+  redeem: '账',
+  subscriptions: '账',
+  payments: '账',
+  ledger: '账',
+  wallet: '账',
+
   models: '配置',
-  loadtest: '配置',
   protocol: '配置',
   keys: '配置',
-  logs: '运营',
   database: '配置',
   settings: '配置',
+  loadtest: '配置',
   wrap: '配置',
 }
 
-const GROUP_ORDER = ['总览', '资源', '运营', '配置']
+const GROUP_ORDER = ['总览', '接入', '分发', '运营', '账', '配置']
 
 export function navItemsFor(views?: string[] | null): typeof NAV_ITEMS {
   if (!Array.isArray(views)) return NAV_ITEMS
