@@ -23,6 +23,16 @@ function fmtNum(n: unknown): string {
 }
 
 /**
+ * 这个"失败"是不是连测试流程都没进（网络/反代/控制面问题）。
+ *
+ * 判据：一条日志都没有、耗时 0ms、而且带着 HTTP 状态码 —— 凭证类失败一定会先
+ * 写下"开始测试凭证槽 …"这行 info，所以空日志 + 有状态码只可能是请求没到达。
+ */
+function transportFailed(result: TestChatResult): boolean {
+  return !result.log?.length && (Number(result.error?.status) || 0) >= 500
+}
+
+/**
  * 测试对话的结果面板：状态头 → 回复正文 → usage → 错误 → 阶段化执行日志。
  * 镜像 index.html `renderVmTestPanel()` 的结果区（3880-3891）。
  *
@@ -35,6 +45,9 @@ export function TestChatResultCard({
   result: TestChatResult | null
   running: boolean
 }) {
+  // TestChatError 带索引签名，status 是 unknown；渲染前收成 number
+  const errorStatus = Number(result?.error?.status) || 0
+
   if (running) {
     return (
       <Card>
@@ -131,6 +144,7 @@ export function TestChatResultCard({
               {result.error.message || '未知错误'}
             </p>
             <p className='flex flex-wrap gap-2 text-xs text-muted-foreground'>
+              {errorStatus ? <span>HTTP {errorStatus}</span> : null}
               {result.error.code ? <span>code {result.error.code}</span> : null}
               {result.error.request_id ? (
                 <span className='font-mono'>
@@ -171,6 +185,15 @@ export function TestChatResultCard({
                 </div>
               ))}
             </div>
+          ) : transportFailed(result) ? (
+            // 0ms + 空日志 = 这个请求根本没进到测试流程：多半是反代/控制面没应答
+            // （重启、502/504），不是凭证被拒。以前这里和"凭证问题"长得一模一样。
+            <p className='text-xs text-muted-foreground'>
+              控制面没有应答（HTTP {errorStatus || '5xx'}
+              {result.error?.code ? ` · ${String(result.error.code)}` : ''}
+              ）：请求没有进入测试流程，通常是网关/控制面正在重启或反代断了 ——
+              稍后重试即可，不代表凭证有问题。
+            </p>
           ) : (
             <p className='text-xs text-muted-foreground'>
               没有日志（请求在进入测试流程前就被拒了）。

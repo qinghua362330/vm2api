@@ -446,6 +446,9 @@ export async function handleCodexProtocol({
   if (!result?.ok) {
     stats.errors++
     logBag.error_code = result?.body?.error?.code || 'codex_upstream'
+    // 失败原因要落到 usage_logs：以前只记 error_code，日志页只看到一句
+    // `codex_cli_failed`，"上游到底说了什么"得进容器翻，太贵了。
+    logBag.error_message = String(result?.body?.error?.message || result?.error || '').slice(0, 300) || null
     logBag.upstream_status = result?.status || 0
     if (!res.headersSent) {
       return json(res, result?.status || 502, result?.body || { error: { type: 'api_error', code: 'codex_upstream' } })

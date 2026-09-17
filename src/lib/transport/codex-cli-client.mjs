@@ -293,6 +293,33 @@ export function codexEventsToSse(events, state) {
  * 由调用方显式关掉并给 thread id。`--skip-git-repo-check` 必须有 —— 槽的 home 目录
  * 不是 git 仓库。stdin 一定要关（否则 CLI 会等 stdin，表现为"卡住"）。
  */
+/**
+ * `codex exec` 非零退出时的失败原因。
+ *
+ * 线上曾经只回一句 `codex exec failed`（既没有事件原文也没有 stderr），查上游到底
+ * 说了什么花了很多时间。这里按可信度取：CLI 的 error/turn.failed 原文 → stderr 尾
+ * → stdout 里那些不是 JSONL 的行（CLI 常把 "Selected model is at capacity" 这类
+ * 话直接打在 stdout）。
+ */
+export function cliFailureMessage({ state = {}, stderr = '', stdoutTail = '' } = {}) {
+  const fromEvent = String(state.error || '').trim()
+  if (fromEvent) return fromEvent.slice(0, 800)
+  const fromStderr = String(stderr || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-6)
+    .join(' · ')
+  if (fromStderr) return fromStderr.slice(0, 800)
+  const fromStdout = String(stdoutTail || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('{'))
+    .slice(-6)
+    .join(' · ')
+  return (fromStdout || 'codex exec failed').slice(0, 800)
+}
+
 export function codexExecArgs({
   prompt = '',
   model = null,
@@ -398,6 +425,7 @@ export async function streamCodexCli({
 
   const state = newCodexStreamState({ model: model || body.model || null })
   let stderr = ''
+  let stdoutTail = ''
   let buffer = ''
   let ttftMs = null
   const emit = async (events) => {
@@ -480,7 +508,11 @@ export async function streamCodexCli({
 
     child.stdout?.setEncoding?.('utf8')
     child.stdout?.on('data', (chunk) => {
-      buffer += String(chunk)
+      const text = String(chunk)
+      buffer += text
+      // 非 JSONL 的输出（CLI 的告警/错误原文）解析事件时会丢，单独留一份尾部：
+      // 否则失败只剩一句 "codex exec failed"，看不出上游到底说了什么。
+      stdoutTail = (stdoutTail + text).slice(-4000)
       // 事件必须在同一次 tick 内按顺序处理，否则两个 chunk 之间的事件会乱序。
       pump().catch(() => {})
     })
@@ -522,7 +554,7 @@ export async function streamCodexCli({
             error: {
               type: 'api_error',
               code: 'codex_cli_failed',
-              message: state.error || stderr.trim().slice(-500) || 'codex exec failed',
+              message: cliFailureMessage({ state, stderr, stdoutTail }),
               exit_code: result.code,
             },
           },
