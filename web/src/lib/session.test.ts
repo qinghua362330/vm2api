@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { logoutRequest } from './api'
-import {
-  LS_BASE,
-  LS_TOKEN,
-  LS_USER,
-  hasSession,
-  setApiBase,
-  setSession,
-} from './session'
+import { LS_BASE, LS_TOKEN, LS_USER, deployBasePath, hasSession, setApiBase, setSession } from './session'
 
 function installBrowser(hostname: string) {
   const values = new Map<string, string>()
@@ -60,5 +53,18 @@ describe('panel session storage', () => {
       method: 'POST',
       credentials: 'include',
     })
+  })
+})
+
+describe('deployBasePath（子路径部署）', () => {
+  it('挂在根上时是空串 —— 接口不带前缀', () => {
+    expect(deployBasePath('/')).toBe('')
+    expect(deployBasePath('')).toBe('')
+  })
+
+  it('挂在子路径下时返回前缀（去掉尾斜杠）', () => {
+    // Vite 的 base 带尾斜杠，请求前缀不能带，否则会拼出 //api/panel
+    expect(deployBasePath('/vm2api/')).toBe('/vm2api')
+    expect(deployBasePath('/a/b/')).toBe('/a/b')
   })
 })

@@ -9,6 +9,19 @@ export function sameOriginPanel(host = location.hostname): boolean {
   return /^(ccmax20\.cc|www\.ccmax20\.cc|kin\.fkcodex\.com)$/i.test(host || '')
 }
 
+/**
+ * 部署前缀（构建期的 Vite base，例如 /vm2api/）。挂在子路径下时，面板接口也必须带
+ * 同样的前缀，否则请求会打到域名根上的别的服务。挂在根上时为 ''。
+ */
+export function deployBasePath(
+  raw: string = String(
+    (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL || '/'
+  )
+): string {
+  const trimmed = String(raw || '/').replace(/\/+$/, '')
+  return trimmed === '' ? '' : trimmed
+}
+
 export function apiBase(): string {
   const host = location.hostname || ''
   if (sameOriginPanel(host)) return ''
@@ -17,7 +30,8 @@ export function apiBase(): string {
   if (/vercel\.app$|netlify\.app$|github\.io$|grok\.me$/i.test(host)) {
     return 'https://ccmax20.cc'
   }
-  return ''
+  // 子路径部署：与页面同源但带前缀，接口跟着前缀走
+  return deployBasePath()
 }
 
 export function setApiBase(base: string) {

@@ -7,6 +7,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # 反代前缀（例如 /vm2api/）。挂在域名根上就留空。
+        VITE_BASE_PATH: ${PUBLIC_BASE_PATH:-/}
     container_name: vm2api
     restart: unless-stopped
     init: true
@@ -26,6 +29,8 @@ services:
       KIN_CODEX_BIN: /opt/vm2api/bin/codex
       HOST: 0.0.0.0
       PORT: ${PORT:-8787}
+      # 与上面的构建参数成对出现：一个管资源前缀，一个管请求剥离
+      PUBLIC_BASE_PATH: ${PUBLIC_BASE_PATH:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./vms:/opt/vm2api/vms

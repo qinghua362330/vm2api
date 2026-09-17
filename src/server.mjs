@@ -81,11 +81,15 @@ import { workerHealth, ensureWorkerCredential } from './lib/transport/go-worker-
 import { stopAllRustKernels } from './lib/transport/rust-kernel-supervisor.mjs'
 import { createRespond } from './lib/http/respond.mjs'
 import { tryServeWebDist } from './lib/http/web-dist.mjs'
+import { normalizeBasePath, stripBasePath } from './lib/http/base-path.mjs'
 import { createRoutingRuntime } from './lib/admin/routing-runtime.mjs'
 import { createImportCommit } from './lib/oauth/import-commit.mjs'
 import { createHandleProtocol } from './lib/protocol/handle-protocol.mjs'
 import { handleUserCountTokens, handleUserUsage } from './lib/protocol/user-count-tokens.mjs'
 import { createPanelHandler } from './lib/admin/panel-routes.mjs'
+
+/** 部署前缀（PUBLIC_BASE_PATH，例如 /vm2api）。空 = 挂在域名根上。 */
+const BASE_PATH = normalizeBasePath(process.env.PUBLIC_BASE_PATH)
 
 const FEATURES = [
   'passthrough',
@@ -855,7 +859,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     const url = new URL(req.url || '/', `http://${req.headers.host}`)
-    const p = url.pathname
+    // 反代挂在前缀下（例如 nginx 的 /vm2api/ → 本机 8787）时，控制台与它的静态资源
+    // 都带前缀进来。在这里剥掉一次，后面的路由就能照旧按 /console、/assets、/api 匹配 ——
+    // 不用给每个 handler 都加一遍前缀。
+    const p = stripBasePath(url.pathname, BASE_PATH)
 
     if (isTelemetryPath(p)) {
       return json(res, 200, telemetryInterceptResponse(p))

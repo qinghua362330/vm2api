@@ -1,6 +1,9 @@
 # Control plane only. Slot guests still run on the host Docker engine.
 FROM node:22-bookworm-slim AS web
 WORKDIR /web
+# 子路径部署：反代挂在 /vm2api/ 下时，产物里的资源与接口都要带这个前缀
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 RUN corepack enable && corepack prepare pnpm@10.18.2 --activate
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -30,6 +33,7 @@ ENV NODE_ENV=production \
     KIN_EGRESS_BIN=/opt/vm2api/bin/kin-egress \
     KIN_WORKER_BIN=/opt/vm2api/bin/kin-worker \
     KIN_CODEX_KERNEL_BIN=/opt/vm2api/bin/kin-codex-kernel \
-    KIN_CODEX_BIN=/opt/vm2api/bin/codex
+    KIN_CODEX_BIN=/opt/vm2api/bin/codex \
+    PUBLIC_BASE_PATH=
 EXPOSE 8787
 ENTRYPOINT ["/usr/local/bin/vm2api-entrypoint"]
