@@ -4149,6 +4149,15 @@ export function createPanelHandler(ctx) {
 
         if (req.method === 'GET' && /^\/api\/panel\/egress-bindings\/[^/]+$/.test(p)) {
           const userId = decodeURIComponent(p.slice('/api/panel/egress-bindings/'.length))
+          // 「这个用户名下有哪些 IP」以前只有主绑定，跨 IP 迁移攒出来的桶只能靠
+          // 列表页那句「N 个桶」猜。这里把集合、主/次、来源和每个 IP 上的活跃会话
+          // 一起给出：绑定的 primary 是"下一个新对话会用哪个 IP"，会话数是"此刻
+          // 正在用哪个 IP"，两个答案都要能看到才算说清楚。
+          const sessionsByEgress = {}
+          for (const session of stickyRouter?.repo?.listByUser?.(userId) || []) {
+            const egressId = String(session?.egress_id || '')
+            if (egressId) sessionsByEgress[egressId] = (sessionsByEgress[egressId] || 0) + 1
+          }
           return json(
             res,
             200,
@@ -4156,6 +4165,10 @@ export function createPanelHandler(ctx) {
               user_id: userId,
               egress: repo.getEgressBinding(userId),
               slot: repo.getSlotBinding(userId),
+              buckets: repo.listBuckets(userId).map((bucket) => ({
+                ...bucket,
+                sessions: sessionsByEgress[bucket.egress_id] || 0,
+              })),
               migrations: repo.listMigrations({ userId, limit: 100 }),
             }),
           )

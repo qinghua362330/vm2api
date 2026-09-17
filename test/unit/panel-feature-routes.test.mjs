@@ -7,6 +7,8 @@ import { closeDatabase, getDb, openDatabase } from '../../src/lib/db/database.mj
 import { UsersRepo } from '../../src/lib/db/repos/users-repo.mjs'
 import { PanelUserStore } from '../../src/lib/admin/panel-users.mjs'
 import { createPanelHandler } from '../../src/lib/admin/panel-routes.mjs'
+import { EgressBindingsRepo } from '../../src/lib/db/repos/egress-bindings-repo.mjs'
+import { StickyRouter } from '../../src/lib/pool/sticky-router.mjs'
 
 /**
  * 已移植功能的冒烟测试：每个功能至少走一次真实路由。
@@ -17,7 +19,7 @@ import { createPanelHandler } from '../../src/lib/admin/panel-routes.mjs'
  * 都应该由一次真实请求来证明，而不是由模块存在来证明。
  */
 
-function harness({ role = 'admin', dir: sharedDir = null } = {}) {
+function harness({ role = 'admin', dir: sharedDir = null, sticky = false } = {}) {
   const dir = sharedDir || fs.mkdtempSync(path.join(os.tmpdir(), 'kin-feature-routes-'))
   const prevDb = process.env.KIN_DB_PATH
   process.env.KIN_DB_PATH = path.join(dir, 'kin.db')
@@ -28,6 +30,9 @@ function harness({ role = 'admin', dir: sharedDir = null } = {}) {
     usersRepo.insert({ id: 'u-2', username: 'u2', email: 'u2@t.local', password_hash: 'x', role: 'user', balance: 999 })
   }
   const panelUsers = new PanelUserStore({ db })
+
+  // 同一个实例喂给 handler 也返回给测试，避免"写这个读那个"的假通过。
+  const stickyRouter = sticky ? new StickyRouter({ db }) : { repo: { countByEgress: () => ({}), listByUser: () => [] } }
 
   let body = {}
   const response = {}
@@ -53,7 +58,7 @@ function harness({ role = 'admin', dir: sharedDir = null } = {}) {
     readBody: async () => body,
     panelUsers,
     usersRepo,
-    stickyRouter: { repo: { countByEgress: () => ({}), listByUser: () => [] } },
+    stickyRouter,
     proxyPool: {
       probeAll: async () => {
         probed.push(1)
@@ -79,7 +84,7 @@ function harness({ role = 'admin', dir: sharedDir = null } = {}) {
     fs.rmSync(dir, { recursive: true, force: true })
   }
 
-  return { dir, call, cleanup }
+  return { dir, db, call, cleanup, stickyRouter }
 }
 
 const ok = (response, label) => {
@@ -413,5 +418,37 @@ test('租户只看得到自己的钱包，运营能看到指定用户', async ()
     )
   } finally {
     tenant.cleanup()
+  }
+})
+
+test('单用户详情列出名下所有 IP，并标出主/次与该 IP 上的活跃会话', async () => {
+  const h = harness({ sticky: true })
+  try {
+    const repo = new EgressBindingsRepo(h.db)
+    // 原生出口：最早绑定的那个（模拟首次分配）。
+    repo.addBucket({ userId: 'u-1', egressId: 'direct:1.1.1.1', reason: 'auto' })
+    // 跨 IP 迁移追加的桶，并成为 primary —— 老 IP 不删。
+    repo.setPrimaryBucket({ userId: 'u-1', egressId: 'proxy-new', reason: 'auto' })
+    repo.upsertSlotBinding({ userId: 'u-1', slotId: 'slot-9', egressId: 'proxy-new', reason: 'auto' })
+    // 两个对话，一个在新 IP，一个还钉在老 IP 上。
+    h.stickyRouter.bind('k1', { accountId: 'a1', vmId: 'slot-9', userId: 'u-1', egressId: 'proxy-new' })
+    h.stickyRouter.bind('k2', { accountId: 'a2', vmId: 'slot-3', userId: 'u-1', egressId: 'direct:1.1.1.1' })
+
+    const detail = ok(await h.call('GET', '/api/panel/egress-bindings/u-1'), 'detail')
+    // primary 镜像与桶集合必须一致：这是"他下一秒从哪出去"。
+    assert.equal(detail.egress.egress_id, 'proxy-new')
+    assert.deepEqual(
+      detail.buckets.map((bucket) => bucket.egress_id),
+      ['proxy-new', 'direct:1.1.1.1'],
+      'primary first',
+    )
+    const byId = new Map(detail.buckets.map((bucket) => [bucket.egress_id, bucket]))
+    assert.equal(byId.get('proxy-new').is_primary, true)
+    assert.equal(byId.get('direct:1.1.1.1').is_primary, false)
+    // 会话是"他此刻正在用哪个 IP"，跟 primary 不是一回事。
+    assert.equal(byId.get('proxy-new').sessions, 1)
+    assert.equal(byId.get('direct:1.1.1.1').sessions, 1)
+  } finally {
+    h.cleanup()
   }
 })

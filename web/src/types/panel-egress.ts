@@ -84,9 +84,36 @@ export type EgressBindingsPayload = {
   error?: string
 }
 
+/** One IP in a user's bucket set, as stored in user_egress_buckets. */
+export type EgressBucketRow = {
+  user_id?: string
+  egress_id: string
+  /** The IP a new conversation will use; the rest are kept for failover. */
+  is_primary: boolean
+  /** auto = 首次分配或迁移链写的；admin = 管理员手工加的 */
+  reason: string
+  bound_by?: string | null
+  bound_at?: string | null
+  updated_at?: string | null
+  /** Conversations currently pinned to this IP. */
+  sessions: number
+}
+
 export type EgressUserDetail = {
   user_id: string
-  egress?: { egress_id: string; reason: string; bound_by?: string | null; bound_at?: string | null } | null
-  slot?: { slot_id: string; egress_id: string; migrations: number; last_reason?: string | null } | null
+  egress?: {
+    egress_id: string
+    reason: string
+    bound_by?: string | null
+    bound_at?: string | null
+  } | null
+  slot?: {
+    slot_id: string
+    egress_id: string
+    migrations: number
+    last_reason?: string | null
+  } | null
+  /** Every IP this user may use, primary first — including ones failover added. */
+  buckets?: EgressBucketRow[]
   migrations?: EgressMigrationRow[]
 }
