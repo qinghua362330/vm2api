@@ -24,13 +24,15 @@ import path from 'node:path'
 import { runtimeKind } from './runtime-kind.mjs'
 import { ensureGuestMachineIdFile } from '../identity/workstation-fingerprint.mjs'
 import { slotNetworkForVm } from './egress.mjs'
-import { codexHomeDir, materializeCodexHome } from './codex-home.mjs'
+import { chownCodexHome, codexHomeDir, codexStateDir, materializeCodexHome } from './codex-home.mjs'
 import { codexKernelBinPath } from '../transport/codex-kernel-supervisor.mjs'
 import { readCodexAccounts } from './codex-slot.mjs'
 import { SLOT_GID, slotUidFor } from './slot-uid.mjs'
 
 export const CODEX_RUNTIME = 'docker'
 export const CODEX_HOME_IN_CONTAINER = '/home/kincli/.codex'
+/** 整份槽 home 挂到容器的 HOME 下（与 Claude 挂 cli-home 完全同构）。 */
+export const CODEX_SLOT_HOME_IN_CONTAINER = '/home/kincli'
 export const CODEX_BIN_IN_CONTAINER = '/usr/local/bin/codex'
 export const CODEX_KERNEL_BIN_IN_CONTAINER = '/usr/local/bin/kin-codex-kernel'
 const GID = String(process.env.KIN_VM_GID || 987)
@@ -99,8 +101,11 @@ export function inspectCodexContainer(name, { shImpl = sh } = {}) {
 export function ensureCodexSlotHome({ projectRoot, vm } = {}) {
   const vmId = String(vm?.id || '').trim()
   if (!projectRoot || !vmId) return { ok: false, reason: 'project_and_vm_required' }
-  const authPath = path.join(codexHomeDir(projectRoot, vmId), 'auth.json')
-  if (fs.existsSync(authPath)) return { ok: true, reused: true, authPath }
+  const authPath = path.join(codexStateDir(projectRoot, vmId), 'auth.json')
+  if (fs.existsSync(authPath)) {
+    chownCodexHome(projectRoot, vmId, vm)
+    return { ok: true, reused: true, authPath }
+  }
   const accounts = readCodexAccounts(projectRoot, vmId)
   const account = accounts.find((item) => String(item?.access_token || '').trim()) || accounts[0] || null
   if (!account) return { ok: false, reason: 'codex_credential_missing' }
@@ -128,6 +133,7 @@ export function preflightCodexSlot({ projectRoot, vm, codexBin = null, image = n
   const homeState = ensureCodexSlotHome({ projectRoot, vm })
   if (!homeState.ok) missing.push(homeState.reason || 'codex_home')
   const home = codexHomeDir(projectRoot, vmId)
+  const state = codexStateDir(projectRoot, vmId)
 
   const network = slotNetworkForVm(vm)
   if (!network || network === 'host' || network === 'bridge') missing.push('slot_network')
@@ -232,9 +238,11 @@ export function startCodexSlotRuntime(
     `kin.vm.id=${vm.id}`,
     '--label',
     'kin.vm.kind=codex',
-    // 一槽一份 CODEX_HOME：凭证、会话、app-server 控制 socket 都在这里
+    // 一槽一份 HOME（= CODEX_HOME 的父目录）：凭证、会话、app-server 控制 socket 都在
+    // 这里。挂整份 home 而不是只挂 .codex，是因为容器里的 $HOME 也得可写 —— CLI 要在
+    // ~/.local/bin 建 PATH alias，写不进去它会告警并可能拒绝启动。
     '-v',
-    `${homeInSlot}:${CODEX_HOME_IN_CONTAINER}`,
+    `${homeInSlot}:${CODEX_SLOT_HOME_IN_CONTAINER}`,
     // CLI 二进制只读挂载：和 kin-worker / kin-kernel 一个套路，不往每个槽里复制 200MB
     '-v',
     `${pre.bin}:${CODEX_BIN_IN_CONTAINER}:ro`,

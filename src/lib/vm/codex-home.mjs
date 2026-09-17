@@ -18,8 +18,12 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { SLOT_GID, slotUidFor } from './slot-uid.mjs'
+import { chownForSlot } from './slot-uid.mjs'
 
 export const CODEX_HOME_DIRNAME = 'codex-home'
+/** HOME 之下的状态目录名：`$CODEX_HOME` = `<home>/.codex`，与官方 CLI 的默认布局一致。 */
+export const CODEX_STATE_DIRNAME = '.codex'
 
 export function codexHomeDir(projectRoot, vmId) {
   const id = String(vmId || '').trim()
@@ -27,14 +31,48 @@ export function codexHomeDir(projectRoot, vmId) {
   return path.join(projectRoot, 'vms', id, CODEX_HOME_DIRNAME)
 }
 
-export function codexAuthPath(projectRoot, vmId) {
+/**
+ * 槽的 HOME 里 `.codex` 那一层（= `$CODEX_HOME`）。
+ *
+ * 为什么不是直接拿 `codex-home` 当 CODEX_HOME：容器里 `$HOME` 必须可写（CLI 要在
+ * `~/.local/bin` 建 PATH alias、要写会话文件），而 kin-os 镜像的 `/home/kincli` 属于
+ * 镜像里的 kincli(999)，槽以 10003 跑，写不进去。所以整份 `codex-home` 挂成容器的
+ * `/home/kincli`（与 Claude 槽挂 cli-home 完全同构），codex 的状态放它下面的 `.codex/`。
+ */
+export function codexStateDir(projectRoot, vmId) {
   const home = codexHomeDir(projectRoot, vmId)
-  return home ? path.join(home, 'auth.json') : ''
+  return home ? path.join(home, CODEX_STATE_DIRNAME) : ''
+}
+
+export function codexAuthPath(projectRoot, vmId) {
+  const state = codexStateDir(projectRoot, vmId)
+  return state ? path.join(state, 'auth.json') : ''
 }
 
 export function codexConfigPath(projectRoot, vmId) {
+  const state = codexStateDir(projectRoot, vmId)
+  return state ? path.join(state, 'config.toml') : ''
+}
+
+/** 把整份槽 home 交给槽的 uid：容器里的进程要能读凭证、写会话与 PATH alias。 */
+export function chownCodexHome(projectRoot, vmId, vm = null) {
   const home = codexHomeDir(projectRoot, vmId)
-  return home ? path.join(home, 'config.toml') : ''
+  const state = codexStateDir(projectRoot, vmId)
+  const owner = vm || { id: vmId }
+  for (const dir of [state, home]) {
+    if (!dir) continue
+    try {
+      fs.chownSync(dir, slotUidFor(owner), Number(SLOT_GID))
+      fs.chmodSync(dir, 0o700)
+    } catch {}
+  }
+  for (const file of [
+    codexAuthPath(projectRoot, vmId),
+    codexConfigPath(projectRoot, vmId),
+    path.join(state || '', 'credentials.json'),
+  ]) {
+    if (file) chownForSlot(file, owner)
+  }
 }
 
 function firstString(...values) {
@@ -152,16 +190,21 @@ export function materializeCodexHome({
   const built = buildCodexAuth({ account, apiKey })
   if (!built.ok) return built
 
-  fs.mkdirSync(home, { recursive: true, mode: 0o700 })
-  const authPath = path.join(home, 'auth.json')
+  const state = path.join(home, CODEX_STATE_DIRNAME)
+  fs.mkdirSync(state, { recursive: true, mode: 0o700 })
+  fs.chmodSync(home, 0o700)
+  const authPath = path.join(state, 'auth.json')
   writeSecret(authPath, `${JSON.stringify(built.auth, null, 2)}\n`)
 
   let configPath = null
   const toml = writeConfig ? buildCodexConfigToml({ model, reasoningEffort, sandboxMode, approvalPolicy }) : ''
   if (toml) {
-    configPath = path.join(home, 'config.toml')
+    configPath = path.join(state, 'config.toml')
     writeSecret(configPath, toml)
   }
+  // 容器里的 CLI/kernel 以槽的 uid 跑：宿主写下的东西必须交给它，否则就是
+  // Permission denied（线上正是这样撞出来的）
+  chownCodexHome(projectRoot, vmId, vm)
 
   return {
     ok: true,
@@ -178,9 +221,10 @@ export function codexHomeStatus({ projectRoot, vm } = {}) {
   const vmId = String(vm?.id || '').trim()
   const home = codexHomeDir(projectRoot, vmId)
   if (!home) return { ok: false, reason: 'project_and_vm_required' }
+  const state = codexStateDir(projectRoot, vmId)
   let raw = null
   try {
-    raw = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'))
+    raw = JSON.parse(fs.readFileSync(path.join(state, 'auth.json'), 'utf8'))
   } catch {
     return { ok: false, reason: 'auth_missing', home }
   }
@@ -197,6 +241,8 @@ export function codexHomeStatus({ projectRoot, vm } = {}) {
     has_refresh: hasRefresh,
     has_api_key: hasApiKey,
     last_refresh: raw?.last_refresh || null,
-    config_present: fs.existsSync(path.join(home, 'config.toml')),
+    home,
+    state_dir: state,
+    config_present: fs.existsSync(path.join(state, 'config.toml')),
   }
 }

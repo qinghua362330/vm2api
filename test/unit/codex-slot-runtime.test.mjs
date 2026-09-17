@@ -146,7 +146,7 @@ test('ensureCodexSlotHome 把槽的凭证写进槽自己的 CODEX_HOME（0600）
     const first = ensureCodexSlotHome({ projectRoot: project, vm })
     assert.equal(first.ok, true)
     assert.equal(first.reused, false)
-    const auth = path.join(project, 'vms', 'vm-7', 'codex-home', 'auth.json')
+    const auth = path.join(project, 'vms', 'vm-7', 'codex-home', '.codex', 'auth.json')
     assert.equal(fs.statSync(auth).mode & 0o777, 0o600)
     assert.equal(JSON.parse(fs.readFileSync(auth, 'utf8')).tokens.account_id, 'acc-7')
     // 第二次不重复写
@@ -189,7 +189,7 @@ test('启动 codex 槽：参数与 Claude 槽逐条对齐，挂的是 codex 的�
     assert.match(joined, /--security-opt no-new-privileges/)
     assert.match(joined, /--label kin\.vm\.kind=codex/)
     // codex 特有的挂载：一槽一份 CODEX_HOME + 只读 CLI
-    assert.match(joined, new RegExp(`-v [^ ]*codex-home:${CODEX_HOME_IN_CONTAINER}`))
+    assert.match(joined, new RegExp(`-v [^ ]*codex-home:/home/kincli`), '整份槽 home 挂到容器的 HOME')
     assert.match(joined, new RegExp(`-v ${bin}:${CODEX_BIN_IN_CONTAINER}:ro`))
     // 运行目录必须挂上：kernel 的 config 与 socket 都在这儿，漏了它容器里的 kernel
     // 会报 "config: No such file or directory"，而 Node 侧只会看到 health_timeout
@@ -284,10 +284,13 @@ test('容器模式写下的 kernel 配置用容器坐标，代理留空', async 
     assert.equal(config.proxy_required, false)
     // kernel 的 accounts 格式被放进槽 home（与 Claude 把凭证放 cli-home 同一信任级别）
     const creds = JSON.parse(
-      fs.readFileSync(path.join(project, 'vms', 'vm-7', 'codex-home', 'credentials.json'), 'utf8'),
+      fs.readFileSync(path.join(project, 'vms', 'vm-7', 'codex-home', '.codex', 'credentials.json'), 'utf8'),
     )
     assert.equal(creds.accounts[0].chatgpt_account_id, 'acc-7')
-    assert.equal(fs.statSync(path.join(project, 'vms', 'vm-7', 'codex-home', 'credentials.json')).mode & 0o777, 0o600)
+    assert.equal(
+      fs.statSync(path.join(project, 'vms', 'vm-7', 'codex-home', '.codex', 'credentials.json')).mode & 0o777,
+      0o600,
+    )
     // 宿主模式不受影响：仍是宿主路径 + 代理必填
     const hostMode = JSON.parse(
       fs.readFileSync(
@@ -370,8 +373,8 @@ test('seedSlotHome 按类型分派：codex 建 codex-home，Claude 建 cli-home'
       'codex 槽不该有 Claude 的 cli-home',
     )
     // 不预写 auth.json / config.toml：凭证等导入或槽启动时由宿主写，配置不猜键
-    assert.equal(fs.existsSync(path.join(seeded.homeDir, 'auth.json')), false)
-    assert.equal(fs.existsSync(path.join(seeded.homeDir, 'config.toml')), false)
+    assert.equal(fs.existsSync(path.join(seeded.homeDir, '.codex', 'auth.json')), false)
+    assert.equal(fs.existsSync(path.join(seeded.homeDir, '.codex', 'config.toml')), false)
 
     // Claude 槽仍走原来的 cli-home
     const claudeVm = { id: 'vm-32', claude: { account_uuid: 'a' } }

@@ -68,9 +68,9 @@ export function writeCodexKernelConfig(
     // 与 Claude 侧把凭证放 cli-home/.claude 是同一个信任级别。
     try {
       const raw = fs.readFileSync(path.join(projectRoot, 'vms', vm.id, 'codex-credentials.json'), 'utf8')
-      const home = path.join(projectRoot, 'vms', vm.id, 'codex-home')
-      fs.mkdirSync(home, { recursive: true, mode: 0o700 })
-      fs.writeFileSync(path.join(home, 'credentials.json'), raw, { mode: 0o600 })
+      const state = path.join(projectRoot, 'vms', vm.id, 'codex-home', '.codex')
+      fs.mkdirSync(state, { recursive: true, mode: 0o700 })
+      fs.writeFileSync(path.join(state, 'credentials.json'), raw, { mode: 0o600 })
     } catch {}
   }
   let secret = String(token || '').trim()
