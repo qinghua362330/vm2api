@@ -1,0 +1,34 @@
+# 控制面容器 + 宿主机 Docker 管槽位。
+# 仓库请放在 /opt/vm2api，否则槽位 -v 路径对不上。
+# 需要：Linux、Docker、把 Release 二进制放到 ./bin/
+services:
+  vm2api:
+    image: vm2api:1.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vm2api
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    env_file:
+      - .env
+    environment:
+      KIN_PROJECT_ROOT: /opt/vm2api
+      KIN_DATA_DIR: /opt/vm2api/data
+      KIN_KERNEL_BIN: /opt/vm2api/bin/kin-kernel
+      KIN_EGRESS_BIN: /opt/vm2api/bin/kin-egress
+      KIN_WORKER_BIN: /opt/vm2api/bin/kin-worker
+      KIN_CODEX_KERNEL_BIN: /opt/vm2api/bin/kin-codex-kernel
+      KIN_CODEX_BIN: /opt/vm2api/bin/codex
+      HOST: 0.0.0.0
+      PORT: ${PORT:-8787}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./vms:/opt/vm2api/vms
+      - ./data:/opt/vm2api/data
+      - ./bin:/opt/vm2api/bin
+      - ./src/config:/opt/vm2api/src/config
