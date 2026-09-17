@@ -1330,3 +1330,57 @@ test('platform scope skips tenant-owned VMs', async (t) => {
   })
   assert.equal(miss.ok, false)
 })
+
+// ── 桶（egress）约束必须在每一级都成立 ──────────────────────────────────────
+
+test('a busy preferred slot never leaks a request to an egress outside the buckets', async (t) => {
+  const root = project()
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const runtimeRepo = new RuntimeRepo()
+  // account-1 (vm-01, the user's own slot) is cooling down. That is NOT a
+  // concurrency wait, so the scheduler legitimately looks for another slot —
+  // but "another slot" must stay inside the egresses the user was granted.
+  runtimeRepo.markCooldown('account-1', {
+    until: Date.now() + 60_000,
+    reason: 'model_cooldown',
+    status: 'ready',
+  })
+  const pool = scheduler(root, { runtimeRepo })
+
+  const selected = await pool.selectAndReserve({
+    model: 'claude-test',
+    preferVmId: 'vm-01',
+    allowedEgressIds: ['proxy-vm-01'],
+    allowWait: false,
+  })
+  assert.equal(selected.ok, false, `leaked to ${selected.vmId} (${selected.egressId || 'no egress'})`)
+  assert.equal(selected.code, 'no_available_accounts')
+})
+
+test('the load-balancing fallback honours the bucket set', async (t) => {
+  const root = project()
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const runtimeRepo = new RuntimeRepo()
+  // vm-01 (in the bucket) is busy and not waitable; only vm-02 (outside the
+  // bucket) is free.
+  runtimeRepo.markCooldown('account-1', {
+    until: Date.now() + 60_000,
+    reason: 'model_cooldown',
+    status: 'ready',
+  })
+  const pool = scheduler(root, { runtimeRepo })
+  const candidates = await pool.eligibleCandidates({ model: 'claude-test' })
+  assert.equal(candidates.length, 2, 'both slots are eligible accounts')
+
+  const byId = new Map(candidates.map((candidate) => [candidate.vmId, candidate]))
+  assert.equal(byId.get('vm-01').busy, true, 'the bucket slot is busy')
+  assert.equal(byId.get('vm-02').busy, false, 'the out-of-bucket slot is free')
+
+  const picked = pool.pick([byId.get('vm-02')], {
+    model: 'claude-test',
+    eligible: candidates,
+    preferVmId: 'vm-01',
+    allowedEgressIds: ['proxy-vm-01'],
+  })
+  assert.equal(picked, null, `picked ${picked?.vmId} outside the bucket set`)
+})

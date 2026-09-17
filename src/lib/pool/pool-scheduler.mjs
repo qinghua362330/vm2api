@@ -646,8 +646,14 @@ export class PoolScheduler {
     }
 
     if (!candidates.length) return null
+    // 负载兜底同样受桶约束。这一级以前只看 priority/loadRatio/策略，于是首选槽
+    // 一旦进入"不可等待"的忙态（模型冷却、周配额切分、凭据被拦 —— 都不是并发类
+    // 等待原因），请求就会被发到一个从未授权给该用户的 IP 上，新会话还会被钉在
+    // 那里直到 TTL 结束。IP 变更只能由绑定层（resolveUserDispatch 的迁移链）决定
+    // 并写审计，调度器无权顺手改；这里没有可用槽时返回 null，让上游等待或失败。
     const highestPriority = Math.max(...candidates.map((candidate) => candidate.priority))
-    let pool = candidates.filter((candidate) => candidate.priority === highestPriority)
+    let pool = candidates.filter((candidate) => candidate.priority === highestPriority && permitted(candidate))
+    if (!pool.length) return null
     const minLoad = Math.min(...pool.map((candidate) => candidate.loadRatio))
     pool = pool.filter((candidate) => candidate.loadRatio === minLoad)
     if (pool.length === 1) return { ...pool[0], selectionReason: 'priority-load' }
