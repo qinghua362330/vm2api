@@ -97,6 +97,9 @@ export function CreateVmFields({
   const [after, setAfter] = useState<string>(
     defaultAfter || DEFAULT_TEMPLATE.after
   )
+  // 凭证类型：Claude（anthropic）或 Codex（openai）。两种槽的机器形状完全一样，
+  // 差别只在槽里装什么、凭证怎么导入 —— 所以这里只是一个字段，不动模板。
+  const [platform, setPlatform] = useState<'claude' | 'codex'>('claude')
   const [region, setRegion] = useState<string>(
     DEFAULT_TEMPLATE.region || VM_REGION_AUTO
   )
@@ -142,8 +145,11 @@ export function CreateVmFields({
           max_concurrency: conc,
           weight,
           ...deriveAfter(after),
-          platform: 'anthropic',
-          family: 'claude',
+          // 建槽时就定下类型：codex 槽同样是一台 kin-os 容器，只是槽里装 codex CLI、
+          // CODEX_HOME 落在 codex-home，凭证之后走 codex 导入。
+          ...(platform === 'codex'
+            ? { platform: 'openai', family: 'codex' }
+            : { platform: 'anthropic', family: 'claude' }),
         }),
       })
       return data.id || data.vm_id || data.vm?.id || id || ''
@@ -174,6 +180,27 @@ export function CreateVmFields({
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className='space-y-1'>
+        <Label>凭证类型</Label>
+        <Select
+          value={platform}
+          onValueChange={(v) => setPlatform(v as 'claude' | 'codex')}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value='claude'>Claude（anthropic）</SelectItem>
+            <SelectItem value='codex'>Codex（openai）</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className='text-xs text-muted-foreground'>
+          {platform === 'codex'
+            ? '槽里装官方 codex CLI，凭证走 codex 导入；不需要 Claude 的 kernel 与 cli-home。'
+            : '槽里装 Claude Code 与 rust kernel，凭证走 Setup Token / OAuth 导入。'}
+        </p>
       </div>
 
       <div className='space-y-1'>
