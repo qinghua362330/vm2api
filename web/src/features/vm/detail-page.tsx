@@ -22,7 +22,7 @@ import {
   vmCost,
   weeklySplitInfo,
 } from '@/lib/fable-status'
-import { usedPctOf } from '@/lib/format'
+import { usedPctOf, usedPctOrNull } from '@/lib/format'
 import { compactEmail, isCodexVm } from '@/lib/vm-kind'
 import {
   accountStatus,
@@ -206,6 +206,9 @@ export function VmDetailPage() {
   }
   const u5 = usedPctOf(quotaSrc, '5h')
   const u7 = usedPctOf(quotaSrc, '7d')
+  // codex 面板要区分"没用过"和"没这个窗口"
+  const u5n = usedPctOrNull(quotaSrc, '5h')
+  const u7n = usedPctOrNull(quotaSrc, '7d')
   const tierKey = claudeTier(vm).key
   const now = useNow()
   const cost = vmCost(vm)
@@ -237,9 +240,7 @@ export function VmDetailPage() {
 
   return (
     <PageHeader
-      title={
-        vm.email ? compactEmail(vm.email, 28) : vm.name || vm.id
-      }
+      title={vm.email ? compactEmail(vm.email, 28) : vm.name || vm.id}
       fluid
     >
       <QueryGate
@@ -348,8 +349,8 @@ export function VmDetailPage() {
             dash={dash}
             credType={credType}
             officialCc={officialCc}
-            u5={u5}
-            u7={u7}
+            u5={u5n}
+            u7={u7n}
             tierKey={tierKey}
             todayReadCache={todayReadCache}
             todayWriteCache={todayWriteCache}

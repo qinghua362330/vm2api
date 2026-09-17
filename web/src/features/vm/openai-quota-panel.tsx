@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import type { Vm } from '@/types/panel-vm'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
-import { Meter, ResetAt } from '@/features/vm/detail-section-primitives'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { dashboardQueryOptions } from '@/features/overview/queries'
+import { Meter, ResetAt } from '@/features/vm/detail-section-primitives'
 import { vmQueryOptions } from '@/features/vm/queries'
 
 type QuotaPayload = {
@@ -25,8 +25,9 @@ export function OpenaiQuotaPanel({
   now,
 }: {
   vm: Vm
-  u5: number
-  u7: number
+  /** 比例（0..1）；null = 这个套餐没有该窗口，或还没取到快照 */
+  u5: number | null
+  u7: number | null
   now: number
 }) {
   const qc = useQueryClient()
@@ -52,7 +53,9 @@ export function OpenaiQuotaPanel({
       await refreshAll()
       const count = Number(data?.reset_credits?.available_count)
       toast.success(
-        Number.isFinite(count) ? `已查询，可用重置券 ${count} 张` : '已刷新 GPT 额度'
+        Number.isFinite(count)
+          ? `已查询，可用重置券 ${count} 张`
+          : '已刷新 GPT 额度'
       )
     },
     onError: (error: Error) => toast.error(error.message),
@@ -81,22 +84,39 @@ export function OpenaiQuotaPanel({
   return (
     <div className='grid gap-3'>
       <p className='m-0 text-xs text-muted-foreground'>Codex 额度 · 短时窗口</p>
-      <Meter
-        label='5 小时已用'
-        value={u5}
-        hint={vm.status_5h ? String(vm.status_5h) : undefined}
-      />
-      <div className='text-[11px] text-muted-foreground'>
-        5h 重置 <ResetAt value={vm.reset_5h} now={now} />
-      </div>
-      <Meter
-        label='7 天已用'
-        value={u7}
-        hint={vm.status_7d ? String(vm.status_7d) : undefined}
-      />
-      <div className='text-[11px] text-muted-foreground'>
-        7d 重置 <ResetAt value={vm.reset_7d} now={now} />
-      </div>
+      {/* 窗口不存在时不要画成 0%：那会被读成"一点没用"，而事实是"没有这个窗口" */}
+      {u5 == null ? (
+        <div className='text-[11px] text-muted-foreground'>
+          5 小时窗口：该套餐没有（或还没取到快照，点下面的查询）
+        </div>
+      ) : (
+        <>
+          <Meter
+            label='5 小时已用'
+            value={u5 * 100}
+            hint={vm.status_5h ? String(vm.status_5h) : undefined}
+          />
+          <div className='text-[11px] text-muted-foreground'>
+            5h 重置 <ResetAt value={vm.reset_5h} now={now} />
+          </div>
+        </>
+      )}
+      {u7 == null ? (
+        <div className='text-[11px] text-muted-foreground'>
+          7 天窗口：还没有数据（点下面的查询）
+        </div>
+      ) : (
+        <>
+          <Meter
+            label='7 天已用'
+            value={u7 * 100}
+            hint={vm.status_7d ? String(vm.status_7d) : undefined}
+          />
+          <div className='text-[11px] text-muted-foreground'>
+            7d 重置 <ResetAt value={vm.reset_7d} now={now} />
+          </div>
+        </>
+      )}
       <div className='flex flex-wrap items-center gap-2'>
         <Button
           size='sm'
@@ -104,7 +124,9 @@ export function OpenaiQuotaPanel({
           disabled={busy}
           onClick={() => queryQuota.mutate()}
         >
-          {queryQuota.isPending ? '查询中…' : `查询重置券${credits ? ` ${available}` : ''}`}
+          {queryQuota.isPending
+            ? '查询中…'
+            : `查询重置券${credits ? ` ${available}` : ''}`}
         </Button>
         <Button
           size='sm'

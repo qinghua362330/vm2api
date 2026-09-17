@@ -31,6 +31,37 @@ export function usedPctOf(
   return pct(window === '5h' ? source?.utilization_5h : source?.utilization_7d)
 }
 
+/**
+ * 同 usedPctOf，但"没有这个窗口"返回 null 而不是 0。
+ *
+ * 0% 和"套餐里没有 5 小时窗口"是两件事：前者是"一点没用"，后者是"不存在"。面板上
+ * 画成 0% 会让人以为额度没用过（Codex 的 7 天-only 套餐就是这样）。
+ */
+export function usedPctOrNull(
+  source:
+    | {
+        utilization_5h?: unknown
+        utilization_7d?: unknown
+        codex_usage?: {
+          windows?: Array<{ id?: string; used_percent?: unknown }>
+        } | null
+      }
+    | null
+    | undefined,
+  window: '5h' | '7d'
+): number | null {
+  const hit = source?.codex_usage?.windows?.find((row) => row?.id === window)
+  if (hit?.used_percent != null && hit.used_percent !== '') {
+    const n = Number(hit.used_percent)
+    if (Number.isFinite(n)) return Math.max(0, Math.min(100, n))
+  }
+  const raw = window === '5h' ? source?.utilization_5h : source?.utilization_7d
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return null
+  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n))
+}
+
 export function fmtNum(n: unknown): string {
   const v = Number(n) || 0
   if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`

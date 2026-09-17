@@ -1,14 +1,15 @@
 import type { Dashboard } from '@/types/panel-overview'
 import type { Vm, VmKernelSnapshot, VmProxySnap } from '@/types/panel-vm'
 import type { StatusTone } from '@/types/status'
-import type {
-  ConcurrencyInfo,
-  RpmInfo,
-  SessionCapacity,
-  VmCostSummary,
-  WeeklySplitSummary,
+import {
+  fableCap,
+  fableCardInfo,
+  type ConcurrencyInfo,
+  type RpmInfo,
+  type SessionCapacity,
+  type VmCostSummary,
+  type WeeklySplitSummary,
 } from '@/lib/fable-status'
-import { fableCap, fableCardInfo } from '@/lib/fable-status'
 import { fmtNum, fmtUsd } from '@/lib/format'
 import { isCodexVm } from '@/lib/vm-kind'
 import {
@@ -40,8 +41,9 @@ type Props = {
   acc: Record<string, unknown>
   proxy: VmProxySnap
   dash: { data: Dashboard | undefined }
-  u5: number
-  u7: number
+  /** 比例（0..100）；null = 该套餐没有这个窗口（只有 codex 面板会拿到 null） */
+  u5: number | null
+  u7: number | null
   tierKey: string
   now: number
   cost: VmCostSummary
@@ -195,7 +197,10 @@ export function VmStatusBoard(props: Props) {
                 vm={vm}
                 // accountStatus() is a loose Record<string, unknown>, so narrow
                 // before handing the value to a typed prop.
-                email={vm.email || (typeof acc.email === 'string' ? acc.email : undefined)}
+                email={
+                  vm.email ||
+                  (typeof acc.email === 'string' ? acc.email : undefined)
+                }
                 compact
               />
             </Field>
@@ -233,7 +238,7 @@ export function VmStatusBoard(props: Props) {
               <>
                 <Meter
                   label='5 小时已用'
-                  value={u5}
+                  value={u5 ?? 0}
                   hint={
                     vm.reset_5h
                       ? `重置 ${String(vm.status_5h || '')}`.trim()
@@ -242,7 +247,7 @@ export function VmStatusBoard(props: Props) {
                 />
                 <Meter
                   label='7 天已用'
-                  value={u7}
+                  value={u7 ?? 0}
                   hint={String(vm.status_7d || '')}
                 />
                 {fable.usedPct != null ? (

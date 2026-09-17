@@ -37,8 +37,9 @@ type VmAccountTabProps = {
   dash: { data: Dashboard | undefined }
   credType: CredType
   officialCc: boolean
-  u5: number
-  u7: number
+  /** 比例（0..100）；codex 侧可能是 null（该套餐没有这个窗口） */
+  u5: number | null
+  u7: number | null
   tierKey: string
   todayReadCache: number
   todayWriteCache: number
@@ -163,7 +164,9 @@ export function VmAccountTab(props: VmAccountTabProps) {
               <Field label={gpt ? 'ChatGPT 账号' : 'UUID'} compact>
                 {gpt ? (
                   <span className='text-sm'>
-                    {String(vm.email || vm.account_uuid || acc.account_id || '—')}
+                    {String(
+                      vm.email || vm.account_uuid || acc.account_id || '—'
+                    )}
                   </span>
                 ) : (
                   <span className='font-mono text-xs'>

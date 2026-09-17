@@ -263,6 +263,8 @@ export function createPanelHandler(ctx) {
   const officialCcStatsHandler = (...args) => ctx.officialCcStatsHandler(...args)
   const refreshWorkerCredentialForVm = (...args) => ctx.refreshWorkerCredentialForVm(...args)
   const fetchWorkerModels = (...args) => ctx.fetchWorkerModels(...args)
+  // 测试可以注入替身，免得单测真的去连上游额度接口
+  const refreshCodexQuota = (...args) => (ctx.codexQuotaRefresh || panel.buildOpenaiQuotaRefresh)(...args)
 
   /**
    * 审计写入。调用点遍布所有改动型路由，但它们此前只是"调用了 audit" —— 这个
@@ -310,6 +312,37 @@ export function createPanelHandler(ctx) {
     if (!vm) return false
     if (isCodexVm(vm)) return !!summarizeCodexSlot(cfg.paths.project, vm).has_token
     return vmHasClaudeCredential(vm)
+  }
+
+  /**
+   * codex 额度快照的自动预热。
+   *
+   * 快照只在 `queryOpenaiQuota` 里落盘（`vms/<id>.json` 的 `codex.extra/usage`），
+   * 而它原先只有面板上那个「查询重置券」按钮会触发。于是刚导入凭证、刚启动的
+   * 槽，面板上永远是 `5 小时已用 0% / 7 天已用 0% / 重置 —`——看起来像坏了。
+   * 这里在导入、启动、打开详情三个时机顺手拉一次（节流 3 分钟、并发去重、
+   * 失败静默），面板自己就活了。
+   */
+  const CODEX_QUOTA_WARM_MS = 3 * 60_000
+  const codexQuotaWarmAt = new Map()
+  const codexQuotaWarming = new Set()
+  function warmCodexQuota(vmId, { force = false } = {}) {
+    const id = String(vmId || '').trim()
+    if (!id || process.env.KIN_CRS_MOCK === '1') return
+    const vm = getVm(cfg.paths.project, id)
+    if (!vm || !isCodexVm(vm) || !slotHasCredential(vm)) return
+    if (codexQuotaWarming.has(id)) return
+    if (!force && Date.now() - (codexQuotaWarmAt.get(id) || 0) < CODEX_QUOTA_WARM_MS) return
+    codexQuotaWarming.add(id)
+    codexQuotaWarmAt.set(id, Date.now())
+    const done = (result) => {
+      // 失败就别占着节流窗口，下次请求还能再试
+      if (!result || result.ok === false || result.status >= 400) codexQuotaWarmAt.delete(id)
+      codexQuotaWarming.delete(id)
+    }
+    void Promise.resolve()
+      .then(() => refreshCodexQuota({ cfg, id }))
+      .then(done, () => done(null))
   }
 
   function restoreSchedulableIfReady(vmId) {
@@ -2299,6 +2332,8 @@ export function createPanelHandler(ctx) {
           kernelHealth: panelKernelHealth,
         })
         if (result.status) return json(res, result.status, result.body)
+        // 打开详情页顺手预热额度快照：不阻塞本次响应，下一次刷新就能看到真实百分比
+        warmCodexQuota(id)
         return json(res, 200, result)
       }
       // PATCH /api/panel/vms/:id — hot concurrency / allowed models (no VM restart)
@@ -3152,6 +3187,7 @@ export function createPanelHandler(ctx) {
         }
         vm.updated_at = new Date().toISOString()
         atomicWriteJson(vmPath, vm, { mode: 0o600 })
+        if (vm.schedulable) warmCodexQuota(id, { force: true })
         return json(
           res,
           200,
@@ -3250,6 +3286,7 @@ export function createPanelHandler(ctx) {
             if (slotHasCredential(getVm(cfg.paths.project, existing.id) || existing)) {
               setVmSchedulable(cfg.paths.project, existing.id, true)
             }
+            warmCodexQuota(existing.id, { force: true })
             return json(res, 200, panel.ok(committed))
           }
 
