@@ -22,8 +22,9 @@ import { mergeNotifyConfig, publicNotifyConfig, publicRoutingNotify, sendNotifyT
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import { publicUserView } from './panel-users.mjs'
 import { AUDIT_ACTIONS, AuditLog } from './audit-log.mjs'
-import { ChannelMonitor } from './channel-monitor.mjs'
+import { ChannelMonitor, summarizeProbes } from './channel-monitor.mjs'
 import { OpsDashboard } from './ops-dashboard.mjs'
+import { UserAttributes, matchesAttributeFilters } from './user-attributes.mjs'
 import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
 import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
 import { BalanceLedger } from '../billing/balance-ledger.mjs'
@@ -262,6 +263,40 @@ export function createPanelHandler(ctx) {
   const officialCcStatsHandler = (...args) => ctx.officialCcStatsHandler(...args)
   const refreshWorkerCredentialForVm = (...args) => ctx.refreshWorkerCredentialForVm(...args)
   const fetchWorkerModels = (...args) => ctx.fetchWorkerModels(...args)
+
+  /**
+   * 审计写入。调用点遍布所有改动型路由，但它们此前只是"调用了 audit" —— 这个
+   * 名字从来没有被定义过，所以每个写了审计的路由都会 ReferenceError（最轻也是
+   * 500）。这里补上定义，并保持两条纪律：
+   *
+   *   1. AuditLog 延迟构造：createPanelHandler 也被没有打开数据库的测试与启动
+   *      路径使用，构造期抛错不该让面板起不来。
+   *   2. 不抛错：被审计的动作已经发生了，写日志失败不能反过来让请求失败。
+   */
+  function audit(req, action, { targetType = null, targetId = null, detail = null } = {}) {
+    try {
+      const ident = panelIdentity(req)
+      return new AuditLog().record({
+        actor: ident.user,
+        actorRole: ident.role,
+        action,
+        targetType,
+        targetId,
+        detail,
+        ip: clientIp(req),
+      })
+    } catch (error) {
+      console.error('[audit] write failed:', error?.message || error)
+      return { ok: false, reason: 'write_failed', error: String(error?.message || error) }
+    }
+  }
+
+  function clientIp(req) {
+    const forwarded = String(req?.headers?.['x-forwarded-for'] || '')
+      .split(',')[0]
+      .trim()
+    return String(forwarded || req?.socket?.remoteAddress || '').slice(0, 45)
+  }
 
   function restoreSchedulableIfReady(vmId) {
     const vm = getVm(cfg.paths.project, vmId)
@@ -861,6 +896,47 @@ export function createPanelHandler(ctx) {
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
+      // ---- 用户属性定义 / 取值 ----
+      if (p === '/api/panel/user-attributes' || p.startsWith('/api/panel/user-attributes/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const attrs = new UserAttributes()
+        if (req.method === 'GET' && p === '/api/panel/user-attributes') {
+          return json(res, 200, panel.ok({ attributes: attrs.overview() }))
+        }
+        if (req.method === 'POST' && p === '/api/panel/user-attributes') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          try {
+            const def = attrs.createDef(body)
+            audit(req, 'user_attribute.create', { targetType: 'attribute', targetId: def.id, detail: body })
+            return json(res, 200, panel.ok({ attribute: def }))
+          } catch (error) {
+            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_attribute' } })
+          }
+        }
+        const attrId = p.match(/^\/api\/panel\/user-attributes\/(\d+)$/)
+        if (attrId) {
+          const id = Number(attrId[1])
+          if (req.method === 'PATCH' || req.method === 'PUT') {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            try {
+              const def = attrs.updateDef(id, body)
+              audit(req, 'user_attribute.update', { targetType: 'attribute', targetId: id, detail: body })
+              return json(res, 200, panel.ok({ attribute: def }))
+            } catch (error) {
+              return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_attribute' } })
+            }
+          }
+          if (req.method === 'DELETE') {
+            attrs.removeDef(id)
+            audit(req, 'user_attribute.delete', { targetType: 'attribute', targetId: id })
+            return json(res, 200, panel.ok({ removed: id }))
+          }
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
       // ---- 运营大盘 ----
       if (req.method === 'GET' && p === '/api/panel/ops') {
         const ident = panelIdentity(req)
@@ -892,8 +968,13 @@ export function createPanelHandler(ctx) {
               channel_id: channel.id,
               name: channel.name,
               status: channel.status,
-              buckets: buckets.map((egressId) => ({ egress_id: egressId, ...byEgress.get(egressId) })),
-              health: health.get(channel.id) || summarizeEmpty(),
+              buckets: buckets.map((egressId) => ({
+                egress_id: egressId,
+                ...(byEgress.get(egressId) || summarizeProbes([])),
+              })),
+              // healthByChannel keys by Number(id); a string id would silently
+              // fall back to the empty summary on every row.
+              health: health.get(Number(channel.id)) || summarizeProbes([]),
             }
           })
           return json(
@@ -1292,6 +1373,7 @@ export function createPanelHandler(ctx) {
         // PanelUserStore already holds the UsersRepo, and the users table is
         // where concurrency/balance/notes live (the panel view is a projection).
         const usersRepo = panelUsers?.repo || ctx.usersRepo || null
+        const attrStore = new UserAttributes()
 
         const egressIndex = () => {
           const repo = new EgressBindingsRepo()
@@ -1343,6 +1425,30 @@ export function createPanelHandler(ctx) {
           }
           if (role) rows = rows.filter((r) => String(r.role || '').toLowerCase() === role)
           if (status) rows = rows.filter((r) => String(r.status || '').toLowerCase() === status)
+
+          // Attribute filters arrive as attr_<key>=value. Bags are attached to the
+          // rows either way so the list can show them.
+          const bags = attrStore.bagsFor(rows.map((r) => r.id))
+          const knownKeys = new Set(attrStore.listDefs().map((def) => def.key))
+          const attrFilters = {}
+          const ignoredAttributeFilters = []
+          for (const [rawKey, value] of url.searchParams.entries()) {
+            if (!rawKey.startsWith('attr_')) continue
+            const key = rawKey.slice(5)
+            if (String(value).trim() === '') continue
+            // A filter whose definition is gone matches nobody, so an empty list
+            // would appear with nothing on screen explaining why. Drop it and say
+            // so in the payload instead of silently hiding every user.
+            if (!knownKeys.has(key)) {
+              ignoredAttributeFilters.push(key)
+              continue
+            }
+            attrFilters[key] = value
+          }
+          rows = rows.map((r) => ({ ...r, attributes: bags.get(r.id) || {} }))
+          if (Object.keys(attrFilters).length) {
+            rows = rows.filter((r) => matchesAttributeFilters(r.attributes, attrFilters))
+          }
           const dir = sortOrder === 'asc' ? 1 : -1
           rows.sort((a, b) => {
             const av = a[sortBy] ?? ''
@@ -1352,16 +1458,21 @@ export function createPanelHandler(ctx) {
           })
           const total = rows.length
           const start = (page - 1) * pageSize
-          return json(res, 200, panel.ok({ users: rows.slice(start, start + pageSize), total, page, page_size: pageSize }))
+          return json(
+            res,
+            200,
+            panel.ok({
+              users: rows.slice(start, start + pageSize),
+              total,
+              page,
+              page_size: pageSize,
+              ignored_attribute_filters: ignoredAttributeFilters,
+            }),
+          )
         }
 
         if (req.method === 'POST' && p === '/api/panel/users') {
           const body = await readBody(req, 64 * 1024).catch(() => ({}))
-          audit(req, AUDIT_ACTIONS.userCreate, {
-            targetType: 'user',
-            targetId: body.username,
-            detail: { role: body.role, status: body.status },
-          })
           try {
             const rec = panelUsers.create({
               username: body.username,
@@ -1370,7 +1481,27 @@ export function createPanelHandler(ctx) {
               enabled: body.status ? body.status === 'active' : body.enabled !== false,
               vm_create_quota: body.vm_create_quota,
             })
-            return json(res, 200, panel.ok({ user: publicUserView(rec) }))
+            // Recorded after the insert: an audit row saying a user was created
+            // when the create then threw (duplicate name, weak password) would be
+            // a lie in the one table operators trust.
+            audit(req, AUDIT_ACTIONS.userCreate, {
+              targetType: 'user',
+              targetId: rec.id,
+              detail: { username: rec.username, role: body.role, status: body.status },
+            })
+            // Attributes are applied after the insert so a rejected value cannot
+            // leave a half-created user behind; the rejection is reported, not
+            // swallowed, because the console shows the create form's own errors.
+            let attributeResult = null
+            if (body.attributes && typeof body.attributes === 'object') {
+              attributeResult = new UserAttributes().setValues(rec.id, body.attributes)
+              audit(req, 'user_attribute.set_values', {
+                targetType: 'user',
+                targetId: rec.id,
+                detail: { applied: attributeResult.applied, rejected: attributeResult.rejected },
+              })
+            }
+            return json(res, 200, panel.ok({ user: publicUserView(rec), attributes: attributeResult }))
           } catch (error) {
             return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_user' } })
           }
@@ -1421,7 +1552,16 @@ export function createPanelHandler(ctx) {
               : usersRepo?.getById(userId) || target
             // detail carries the patch verbatim; AuditLog redacts the password.
             audit(req, AUDIT_ACTIONS.userUpdate, { targetType: 'user', targetId: userId, detail: body })
-            return json(res, 200, panel.ok({ user: publicUserView(rec) }))
+            let attributeResult = null
+            if (body.attributes && typeof body.attributes === 'object') {
+              attributeResult = new UserAttributes().setValues(userId, body.attributes)
+              audit(req, 'user_attribute.set_values', {
+                targetType: 'user',
+                targetId: userId,
+                detail: { applied: attributeResult.applied, rejected: attributeResult.rejected },
+              })
+            }
+            return json(res, 200, panel.ok({ user: publicUserView(rec), attributes: attributeResult }))
           }
           if (req.method === 'DELETE') {
             panelUsers.remove(userId, { actorId: ident.id || null })
@@ -3872,6 +4012,7 @@ export function createPanelHandler(ctx) {
         const vms = listVms(cfg.paths.project)
         const byId = new Map(vms.map((v) => [v.id, v]))
         const gates = buildEgressGates({ quota: accountQuota, runtimeRepo: ctx.runtimeRepo })
+        const attrStore = new UserAttributes()
 
         if (req.method === 'GET' && p === '/api/panel/egress-bindings') {
           const slotBindings = repo.listSlotBindings()

@@ -21,8 +21,8 @@
     "build:web": "pnpm -C web build",
     "test:kernel": "cargo test --manifest-path crates/kin-kernel/Cargo.toml && cargo test --manifest-path crates/codex-kernel/Cargo.toml",
     "test:web": "pnpm -C web test",
+    "lint:undeclared": "biome lint --only=correctness/noUndeclaredVariables --config-path=./biome.undeclared.json src test scripts",
     "test:api-kernel": "cd api-kernel && go test ./...",
-
     "format": "biome format --write && gofmt -w worker api-kernel",
     "format:check": "biome format && node scripts/check-gofmt.mjs"
   },

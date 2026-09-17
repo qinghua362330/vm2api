@@ -2,8 +2,7 @@ import { type ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { DataTableColumnHeader } from '@/components/data-table'
-import type { PanelUserRow } from '@/types/panel-users'
-import { ROLE_LABELS } from '@/types/panel-users'
+import { ROLE_LABELS, type PanelUserRow } from '@/types/panel-users'
 import { migrationReasonLabel } from '@/features/egress/slot-state'
 
 function relative(iso?: string | null): string {

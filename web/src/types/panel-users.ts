@@ -35,6 +35,8 @@ export type PanelUserRow = {
   updated_at?: string | null
   last_login_at?: string | null
   last_active_at?: string | null
+  /** Operator-defined fields, keyed by attribute key. */
+  attributes?: Record<string, string>
   egress?: UserEgress
 }
 
@@ -43,6 +45,8 @@ export type PanelUsersPayload = {
   total?: number
   page?: number
   page_size?: number
+  /** 请求里带了、但定义已不存在的属性筛选键（服务端按"不生效"处理并在此回报）。 */
+  ignored_attribute_filters?: string[]
   error?: string
 }
 

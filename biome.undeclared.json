@@ -1,0 +1,15 @@
+{
+  "linter": {
+    "enabled": true,
+    "rules": { "correctness": { "noUndeclaredVariables": "error" } }
+  },
+  "javascript": {
+    "globals": [
+      "process", "console", "Buffer", "URL", "URLSearchParams", "TextEncoder", "TextDecoder",
+      "setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "queueMicrotask",
+      "fetch", "AbortController", "AbortSignal", "structuredClone", "crypto", "performance",
+      "__dirname", "__filename", "require", "module", "exports", "global", "globalThis", "atob", "btoa"
+    ]
+  },
+  "files": { "includes": ["src/**", "test/**", "scripts/**/*.mjs"] }
+}

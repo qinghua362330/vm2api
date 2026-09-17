@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  type ColumnDef,
   type ColumnFiltersState,
   type SortingState,
   type VisibilityState,
@@ -11,6 +12,7 @@ import {
 } from '@tanstack/react-table'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,10 +44,11 @@ import { QueryGate } from '@/components/query-gate'
 import { TableSkeleton } from '@/components/page-skeletons'
 import { DataTableBulkActions, DataTablePagination, DataTableToolbar } from '@/components/data-table'
 import { StatCard } from '@/components/stat-card'
-import type { PanelUserRow } from '@/types/panel-users'
-import { ROLE_LABELS, USER_ROLES } from '@/types/panel-users'
-import { usersQueryOptions } from './queries'
+import { ROLE_LABELS, USER_ROLES, type PanelUserRow } from '@/types/panel-users'
+import { userAttributesQueryOptions, usersQueryOptions, type AttributeDef } from './queries'
 import { userColumns } from './user-columns'
+import { AttributeDefsDialog } from './attribute-defs-dialog'
+import { attributeValueLabel } from './attribute-label'
 
 type FormState = {
   username: string
@@ -84,14 +87,42 @@ export function UsersPage() {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [deleting, setDeleting] = useState<PanelUserRow | null>(null)
+  const [attrDraft, setAttrDraft] = useState<Record<string, string>>({})
+  const [defsOpen, setDefsOpen] = useState(false)
+  const attrsCfg = useQuery(userAttributesQueryOptions())
+  const attributeDefs: AttributeDef[] = attrsCfg.data?.attributes || []
+  const filterDefs = attributeDefs.filter((def) => def.show_in_filter && def.status === 'active')
 
   const activeFilter = (id: string): string[] => {
     const found = columnFilters.find((f) => f.id === id)
     return Array.isArray(found?.value) ? (found?.value as string[]) : []
   }
 
+  const attrKeySignature = filterDefs.map((def) => def.key).join(',')
+
+  const attrFilters = Object.fromEntries(
+    filterDefs
+      .map((def) => [def.key, activeFilter(`attr:${def.key}`)[0] || ''] as const)
+      .filter(([, value]) => value),
+  )
+
+  // 定义被删掉后浏览器里可能还留着 `attr:xxx` 的筛选状态：那一列已经不存在，
+  // 界面上看不到，但请求会一直带着它。这里按当前定义把它清掉，免得出现
+  // "筛选条是空的、列表却是空" 的鬼状态。
+  useEffect(() => {
+    if (!attrsCfg.isSuccess) return
+    setColumnFilters((current) => {
+      const next = current.filter(
+        (filter) => !String(filter.id).startsWith('attr:') || filterDefs.some((def) => `attr:${def.key}` === filter.id),
+      )
+      return next.length === current.length ? current : next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attrsCfg.isSuccess, attrKeySignature])
+
   const query = useQuery(
     usersQueryOptions({
+      attributes: attrFilters,
       // The toolbar's search box is a column filter on username.
       search: activeFilter('username')[0] || '',
       role: activeFilter('role')[0] || '',
@@ -105,12 +136,62 @@ export function UsersPage() {
 
   const rows = query.data?.users || []
   const total = query.data?.total ?? rows.length
+  const ignoredAttrFilters = query.data?.ignored_attribute_filters || []
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
+
+  // 属性筛选挂在隐藏列上：DataTableToolbar 的 faceted filter 需要一个列来存筛选值，
+  // 而这些值照旧由服务端解释（manualFiltering），列本身不渲染任何内容。
+  const attrColumn: ColumnDef<PanelUserRow> = {
+    id: 'attributes',
+    header: '属性',
+    cell: ({ row }) => {
+      const entries = filterDefs
+        .map((def) => [def, row.original.attributes?.[def.key]] as const)
+        .filter(([, value]) => value)
+      if (!entries.length) return <span className='text-muted-foreground text-xs'>—</span>
+      return (
+        <div className='flex max-w-[16rem] flex-wrap gap-1'>
+          {entries.map(([def, value]) => (
+            <Badge key={def.key} variant='outline' className='text-xs font-normal' title={def.name}>
+              {def.name}:{attributeValueLabel(def, String(value))}
+            </Badge>
+          ))}
+        </div>
+      )
+    },
+    enableSorting: false,
+    enableHiding: false,
+  }
+
+  const columns = useMemo(
+    () => [
+      ...userColumns,
+      ...(filterDefs.length ? [attrColumn] : []),
+      ...filterDefs.map((def) => ({
+        id: `attr:${def.key}`,
+        accessorFn: (row: PanelUserRow) => row.attributes?.[def.key] ?? '',
+        header: () => null,
+        cell: () => null,
+        enableSorting: false,
+        enableHiding: false,
+      })),
+    ],
+    // 定义查询一刷新就重建列，否则属性名改了列头还是旧的。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attrKeySignature, attrsCfg.dataUpdatedAt],
+  )
+
+  // 属性列只是筛选状态的载体，默认全部隐藏（列可见性由用户自己的选择覆盖）。
+  const hiddenAttrColumns = useMemo(
+    () => Object.fromEntries(filterDefs.map((def) => [`attr:${def.key}`, false])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attrKeySignature],
+  )
 
   const table = useReactTable({
     data: rows,
-    columns: userColumns,
-    state: { sorting, columnFilters, columnVisibility, rowSelection },
+    columns,
+    state: { sorting, columnFilters, columnVisibility: { ...hiddenAttrColumns, ...columnVisibility }, rowSelection },
     // Server-side: search / filters / sort / paging all go to the API.
     manualPagination: true,
     manualSorting: true,
@@ -147,6 +228,7 @@ export function UsersPage() {
         concurrency: Number(form.concurrency) || 0,
         vm_create_quota: Number(form.vm_create_quota) || 0,
         notes: form.notes,
+        attributes: attrDraft,
         ...(form.password ? { password: form.password } : {}),
       }
       if (editing) {
@@ -200,6 +282,7 @@ export function UsersPage() {
 
   const openEdit = (user: PanelUserRow) => {
     setEditing(user)
+    setAttrDraft({ ...(user.attributes || {}) })
     setForm({
       username: user.username,
       password: '',
@@ -215,13 +298,19 @@ export function UsersPage() {
     setCreating(true)
     setEditing(null)
     setForm(EMPTY_FORM)
+    setAttrDraft({})
   }
 
   return (
     <PageHeader
       title='用户'
       extra={
-        <Button onClick={openCreate}>新建用户</Button>
+        <div className='flex gap-2'>
+          <Button variant='outline' onClick={() => setDefsOpen(true)}>
+            属性定义
+          </Button>
+          <Button onClick={openCreate}>新建用户</Button>
+        </div>
       }
     >
       <div className='mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
@@ -267,8 +356,21 @@ export function UsersPage() {
                   { label: '已禁用', value: 'disabled' },
                 ],
               },
+              ...filterDefs.map((def) => ({
+                columnId: `attr:${def.key}`,
+                title: def.name,
+                options: (def.type === 'select' && def.used_values.length ? def.used_values : def.options).map(
+                  (value) => ({ label: attributeValueLabel(def, value), value }),
+                ),
+              })),
             ]}
           />
+
+          {ignoredAttrFilters.length ? (
+            <p className='text-muted-foreground text-xs'>
+              已忽略 {ignoredAttrFilters.join('、')}：这些属性定义已不存在，筛选未生效。
+            </p>
+          ) : null}
 
           <div className='overflow-hidden rounded-md border'>
             <Table density='compact'>
@@ -455,6 +557,50 @@ export function UsersPage() {
               />
             </div>
           </div>
+          {attributeDefs.filter((d) => d.status === 'active').length ? (
+            <div className='grid gap-3 rounded-md border p-3'>
+              <Label className='text-xs'>自定义属性</Label>
+              <div className='grid gap-3 sm:grid-cols-2'>
+                {attributeDefs
+                  .filter((d) => d.status === 'active')
+                  .map((def) => (
+                    <div key={def.id} className='grid gap-1.5'>
+                      <Label htmlFor={`attr-${def.id}`} className='text-xs font-normal'>
+                        {def.name}
+                      </Label>
+                      {def.type === 'select' ? (
+                        <Select
+                          value={attrDraft[def.key] || '__none__'}
+                          onValueChange={(v) =>
+                            setAttrDraft({ ...attrDraft, [def.key]: v === '__none__' ? '' : v })
+                          }
+                        >
+                          <SelectTrigger id={`attr-${def.id}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value='__none__'>（未设置）</SelectItem>
+                            {def.options.map((option) => (
+                              <SelectItem key={option} value={option}>
+                                {option}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          id={`attr-${def.id}`}
+                          type={def.type === 'date' ? 'date' : 'text'}
+                          placeholder={def.type === 'bool' ? '是 / 否' : ''}
+                          value={attrDraft[def.key] || ''}
+                          onChange={(e) => setAttrDraft({ ...attrDraft, [def.key]: e.target.value })}
+                        />
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               variant='outline'
@@ -475,6 +621,8 @@ export function UsersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AttributeDefsDialog open={defsOpen} onOpenChange={setDefsOpen} />
 
       <ConfirmDialog
         open={!!deleting}
