@@ -18,6 +18,7 @@
     "build:api-kernel": "mkdir -p bin && cd api-kernel && CGO_ENABLED=0 go build -trimpath -o ../bin/kin-api-kernel ./cmd/kin-api-kernel",
     "build:kernel": "mkdir -p bin && cargo build --release --manifest-path crates/kin-kernel/Cargo.toml && cp crates/kin-kernel/target/release/kin-kernel bin/kin-kernel",
     "build:codex-kernel": "mkdir -p bin && cargo build --release --manifest-path crates/codex-kernel/Cargo.toml && cp crates/codex-kernel/target/release/kin-codex-kernel bin/kin-codex-kernel",
+    "install:codex-cli": "node scripts/install-codex-cli.mjs",
     "build:web": "pnpm -C web build",
     "test:kernel": "cargo test --manifest-path crates/kin-kernel/Cargo.toml && cargo test --manifest-path crates/codex-kernel/Cargo.toml",
     "test:web": "pnpm -C web test",

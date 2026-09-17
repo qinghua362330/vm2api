@@ -8,7 +8,11 @@ import { restrictCodexClient } from './codex-restriction.mjs'
 import { responsesSseToChatChunk, toCodexResponses } from './codex-convert.mjs'
 import { streamCodexKernel } from '../transport/codex-kernel-client.mjs'
 import { ensureCodexKernel, writeCodexKernelConfig } from '../transport/codex-kernel-supervisor.mjs'
+import { codexBinPath, streamCodexCli } from '../transport/codex-cli-client.mjs'
+import { materializeCodexHome } from '../vm/codex-home.mjs'
+import { readCodexAccounts } from '../vm/codex-slot.mjs'
 import { boundProxyUrl } from '../vm/egress.mjs'
+import fs from 'node:fs'
 
 function sessionFrom(req, body) {
   const headers = req.headers || {}
@@ -61,6 +65,47 @@ export function isRetryableCodexTransport(result) {
   if (status === 0) return true
   if (status === 502 && /upstream_transport|worker_transport|transport/i.test(`${code} ${msg}`)) return true
   return /upstream_transport|worker_transport_error/i.test(code)
+}
+
+/**
+ * 这一跳由谁执行：真 CLI 还是手写 HTTP 内核。
+ *
+ * `auto`（默认）= 机器上找得到 codex 可执行文件就用 CLI —— 因为"真 CLI"才是这个仓
+ * 想要的形态（真 UA、真请求序列、真版本），手写内核只在没有二进制时兜底。
+ * 显式配 `cli` / `http` 可以钉死，方便回滚。
+ */
+/** 二进制在不在：CLI 与 HTTP 兜底之间的唯一开关。 */
+export function codexBinaryPresent(binPath) {
+  const candidate = String(binPath || '').trim()
+  if (!candidate) return false
+  if (!candidate.includes('/')) return true // PATH 上的裸命令，交给 spawn 判断
+  try {
+    fs.accessSync(candidate, fs.constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function codexEngineFor({ routing = {}, hasBin = null, env = process.env } = {}) {
+  const configured = String(routing.engine || routing.hop || 'auto')
+    .trim()
+    .toLowerCase()
+  // 显式配置（routing.json）优先；`auto` 视为"没钉死"，于是环境变量还能覆盖它 ——
+  // e2e 要可重复就必须能强制某一条引擎，而不必改配置文件。
+  if (configured === 'cli' || configured === 'http') return configured
+  const fromEnv = String(env?.KIN_CODEX_ENGINE || '')
+    .trim()
+    .toLowerCase()
+  if (fromEnv === 'cli' || fromEnv === 'http') return fromEnv
+  return hasBin === false ? 'http' : 'cli'
+}
+
+/** 选槽里哪条账号给 CLI 用：优先有 access_token 的，其次第一条。 */
+export function pickCodexAccount(accounts = []) {
+  const list = Array.isArray(accounts) ? accounts.filter(Boolean) : []
+  if (!list.length) return null
+  return list.find((account) => String(account.access_token || account.accessToken || '').trim()) || list[0] || null
 }
 
 /** Idle SOCKS / first hop 502 is retryable only before any SSE byte is committed. */
@@ -149,23 +194,57 @@ export async function handleCodexProtocol({
       error: { type: 'api_error', code: 'no_codex_vm', message: 'no Codex kernel VM is configured' },
     })
   }
-  logBag.via = 'codex-kernel'
+  const proxyUrl = boundProxyUrl(vm.proxy)
+  const binPath = codexBinPath({ projectRoot })
+  const hasBin = codexBinaryPresent(binPath)
+  const engine = codexEngineFor({ routing: codex, hasBin })
+  logBag.via = engine === 'cli' ? 'codex-cli' : 'codex-kernel'
   logBag.vm_id = vm.id
-  writeCodexKernelConfig(projectRoot, vm, {
-    proxyUrl: boundProxyUrl(vm.proxy),
-    proxyRequired: true,
-  })
-  const ready = await ensureCodexKernel(execFor(projectRoot, vm))
-  if (!ready?.ok) {
-    stats.errors++
-    logBag.error_code = 'codex_kernel_unavailable'
-    return json(res, 503, {
-      error: {
-        type: 'api_error',
-        code: 'codex_kernel_unavailable',
-        message: `Codex kernel 未就绪（${ready?.reason || 'not_ready'}）。GPT 槽走独立 kernel，不是 wrap cli-hop。`,
-      },
+  logBag.codex_engine = engine
+
+  // CLI 形态下凭证/出口落在槽自己的 CODEX_HOME 里（一槽一份，互不串味）；这条链
+  // 同样不允许"没绑代理就直连"—— 那会让槽从宿主机 IP 出去，等于把身份换了。
+  let cliEnv = null
+  if (engine === 'cli') {
+    if (!proxyUrl) {
+      stats.errors++
+      logBag.error_code = 'proxy_required'
+      return json(res, 503, {
+        error: { type: 'api_error', code: 'proxy_required', message: 'Codex 槽未绑定代理，拒绝直连' },
+      })
+    }
+    const prepared = materializeCodexHome({
+      projectRoot,
+      vm,
+      account: pickCodexAccount(readCodexAccounts(projectRoot, vm.id)),
+      proxyUrl,
     })
+    if (!prepared.ok) {
+      stats.errors++
+      logBag.error_code = 'codex_cli_credential_missing'
+      return json(res, 503, {
+        error: {
+          type: 'api_error',
+          code: 'codex_cli_credential_missing',
+          message: `Codex 槽没有可用的 CLI 凭证（${prepared.reason}）。导入 access_token 后重试。`,
+        },
+      })
+    }
+    cliEnv = prepared.env
+  } else {
+    writeCodexKernelConfig(projectRoot, vm, { proxyUrl, proxyRequired: true })
+    const ready = await ensureCodexKernel(execFor(projectRoot, vm))
+    if (!ready?.ok) {
+      stats.errors++
+      logBag.error_code = 'codex_kernel_unavailable'
+      return json(res, 503, {
+        error: {
+          type: 'api_error',
+          code: 'codex_kernel_unavailable',
+          message: `Codex kernel 未就绪（${ready?.reason || 'not_ready'}）。GPT 槽走独立 kernel，不是 wrap cli-hop。`,
+        },
+      })
+    }
   }
   stats.requests++
   stats.by_route[protocol] = (stats.by_route[protocol] || 0) + 1
@@ -174,7 +253,20 @@ export async function handleCodexProtocol({
   const session = sessionFrom(req, converted.body)
   const outboundBody = { ...converted.body, stream: true }
   const chunks = []
-  const hop = ops.streamCodexKernel || streamCodexKernel
+  // 两条引擎同签名（都按 SSE 行回调），所以下游的协议映射完全不用分叉。
+  const hop =
+    engine === 'cli'
+      ? ops.streamCodexCli ||
+        ((args) =>
+          streamCodexCli({
+            ...args,
+            bin: binPath,
+            codexHome: cliEnv?.CODEX_HOME || null,
+            env: cliEnv || {},
+            resume: !!session?.previous_response_id,
+            threadId: session?.previous_response_id || null,
+          }))
+      : ops.streamCodexKernel || streamCodexKernel
   const result = await runCodexKernelHop({
     hop,
     args: {
@@ -207,6 +299,7 @@ export async function handleCodexProtocol({
     }
     return res.end()
   }
+  if (result?.thread_id) logBag.codex_thread_id = result.thread_id
   const usage = result.usage || result.body?.usage || result.body?.response?.usage || null
   logBag.usage = usage
   logBag.input_tokens = usage?.input_tokens ?? usage?.prompt_tokens ?? null

@@ -183,6 +183,7 @@
   },
   "codex": {
     "enabled": true,
+    "engine": "auto",
     "protocols": {
       "openai.responses": { "mode": "native", "enabled": true },
       "openai.chat": { "mode": "convert", "enabled": true },

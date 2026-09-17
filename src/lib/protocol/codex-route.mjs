@@ -9,6 +9,8 @@ export const CODEX_PROTOCOLS = Object.freeze(['openai.responses', 'openai.chat',
 
 export const DEFAULT_CODEX_ROUTING = Object.freeze({
   enabled: true,
+  // 这一跳由谁执行：auto = 有 codex 可执行文件就用真 CLI，否则回退手写 HTTP 内核。
+  engine: 'auto',
   protocols: {
     'openai.responses': { mode: 'native', enabled: true },
     'openai.chat': { mode: 'convert', enabled: true },
@@ -39,8 +41,16 @@ export function normalizeCodexRouting(raw = {}) {
   for (const [key, value] of Object.entries(clients)) {
     clients[key] = value === 'allow' ? 'allow' : 'reject'
   }
+  const engine = ['cli', 'http', 'auto'].includes(
+    String(raw.engine || '')
+      .trim()
+      .toLowerCase(),
+  )
+    ? String(raw.engine).trim().toLowerCase()
+    : DEFAULT_CODEX_ROUTING.engine
   return {
     enabled: raw.enabled !== false,
+    engine,
     protocols,
     convert: {
       chat_to_codex: raw.convert?.chat_to_codex !== false,
