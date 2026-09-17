@@ -201,6 +201,8 @@ import { workerHealth, countTokensViaWorker } from '../transport/go-worker-clien
 import { apiKeyBetaHeader, setupTokenBetaHeader } from '../protocol/claude-code-betas.mjs'
 import { rustKernelHealth, toPublicKernelHealth } from '../transport/rust-kernel-client.mjs'
 import { codexKernelHealth } from '../transport/codex-kernel-client.mjs'
+import { codexBinaryPresent, codexEngineFor } from '../protocol/handle-codex.mjs'
+import { codexBinPath } from '../transport/codex-cli-client.mjs'
 import { setManualScheduleWins } from '../pool/schedule-policy.mjs'
 import { normalizeHealthProbeConfig } from './health-probe.mjs'
 import { normalizeUsageProbeConfig } from '../oauth/usage-probe-monitor.mjs'
@@ -575,27 +577,47 @@ export function createPanelHandler(ctx) {
     const vm = getVm(cfg.paths.project, vmId)
     if (!vm) return { ok: false, vm_id: vmId, error: 'vm_not_found' }
     if (isCodexVm(vm)) {
-      const exec = slotExec(cfg.paths.project, vm)
-      const kernel = await codexKernelHealth(exec, { timeoutMs: 1500 })
       const slot = summarizeCodexSlot(cfg.paths.project, vm)
+      const credential = {
+        has_access: !!slot.has_token,
+        has_refresh: !!slot.has_refresh,
+        email: slot.email || null,
+        expires_at: slot.expires_at || null,
+        account_count: slot.account_count || 0,
+      }
+      // CLI 引擎每次请求 `docker exec` 跑一次 codex，**没有常驻 kernel**；这时把
+      // kernel 探活当成健康标准会冤枉一个完全正常的槽（回 ECONNREFUSED）。
+      const engine = codexEngineFor({
+        routing: ctx.routingConfig?.codex || {},
+        hasBin: codexBinaryPresent(codexBinPath({ projectRoot: cfg.paths.project })),
+      })
+      if (engine === 'cli') {
+        return {
+          ok: credential.has_access,
+          vm_id: vmId,
+          platform: 'openai',
+          engine: 'cli',
+          refresh_owner: 'codex-cli',
+          proxy_required: true,
+          note: 'CLI 引擎：每次请求 docker exec 跑 codex，无常驻 kernel',
+          kernel: null,
+          credential,
+        }
+      }
+      const kernel = await codexKernelHealth(slotExec(cfg.paths.project, vm), { timeoutMs: 1500 })
       return {
         ok: !!kernel?.ok,
         vm_id: vmId,
         platform: 'openai',
-        refresh_owner: 'codex-cli',
+        engine: 'http',
+        refresh_owner: 'codex-kernel',
         proxy_required: true,
         kernel: {
           ...toPublicKernelHealth(kernel, 'codex'),
           proxy_ok: kernel?.proxy_ok ?? null,
           accounts: kernel?.accounts ?? null,
         },
-        credential: {
-          has_access: !!slot.has_token,
-          has_refresh: !!slot.has_refresh,
-          email: slot.email || null,
-          expires_at: slot.expires_at || null,
-          account_count: slot.account_count || 0,
-        },
+        credential,
       }
     }
     const exec = workerExecForVm(vmId)

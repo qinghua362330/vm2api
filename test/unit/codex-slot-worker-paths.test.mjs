@@ -133,13 +133,74 @@ test('GET /api/panel/oauth 对 codex 槽回答 codex 的事，不再抛 worker.s
     assert.equal(res.status, 200)
     const data = res.body.data
     assert.equal(data.vm_id, 'vm-03')
-    assert.equal(data.refresh_owner, 'codex-cli')
     assert.equal(data.platform, 'openai')
+    assert.match(String(data.refresh_owner), /^codex-(cli|kernel)$/)
     assert.ok(!('worker' in data), 'codex 槽不该有 worker 字段')
-    assert.ok(data.kernel, '应回 codex-kernel 的健康')
     assert.ok(!JSON.stringify(res.body).includes('worker.sock'), JSON.stringify(res.body))
+    // 没有 codex 二进制（测试环境）→ auto 落到 http 引擎 → 才该探 codex-kernel
+    if (data.engine === 'http') assert.ok(data.kernel, 'http 引擎应回 codex-kernel 健康')
+    else assert.equal(data.kernel, null, 'CLI 引擎没有常驻 kernel，别拿它当健康标准')
   } finally {
     f.cleanup()
+  }
+})
+
+test('CLI 引擎下 codex 槽的健康看凭证，不看常驻 kernel', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-codex-cli-engine-'))
+  const prev = { db: process.env.KIN_DB_PATH, engine: process.env.KIN_CODEX_ENGINE, bin: process.env.KIN_CODEX_BIN }
+  process.env.KIN_DB_PATH = path.join(dir, 'kin.db')
+  process.env.KIN_CODEX_ENGINE = 'cli'
+  process.env.KIN_CODEX_BIN = 'codex' // PATH 上的裸命令 → codexBinaryPresent 为真
+  const db = openDatabase()
+  const usersRepo = new UsersRepo(db)
+  if (!usersRepo.getById('u-1')) {
+    usersRepo.insert({ id: 'u-1', username: 'u1', email: 'u1@t.local', password_hash: 'x', role: 'user' })
+  }
+  fs.mkdirSync(path.join(dir, 'vms', 'vm-03'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'vms', 'vm-03.json'), JSON.stringify(CODEX_VM))
+  fs.writeFileSync(path.join(dir, 'vms', 'active.json'), JSON.stringify({ active_vm: 'vm-03' }))
+  fs.writeFileSync(
+    path.join(dir, 'vms', 'vm-03', 'codex-credentials.json'),
+    JSON.stringify({ accounts: [{ id: 'a@t.local', access_token: 'at-1', refresh_token: 'rt-1' }] }),
+  )
+  const response = {}
+  const handlePanel = createPanelHandler({
+    cfg: { paths: { project: dir, root: dir }, base_url: 'http://localhost:8787' },
+    requireAuth(req) {
+      req.apiKeyKind = 'master'
+      req.panelRole = 'admin'
+      return true
+    },
+    json(_res, status, payload) {
+      response.status = status
+      response.body = payload
+      return true
+    },
+    readBody: async () => ({}),
+    panelUsers: new PanelUserStore({ db }),
+    usersRepo,
+    stickyRouter: { repo: { countByEgress: () => ({}), listByUser: () => [] } },
+    proxyPool: { probeAll: async () => ({ total: 0, healthy: 0, results: [] }), list: () => [] },
+  })
+  try {
+    await handlePanel({ method: 'GET', headers: {} }, {}, new URL('http://localhost/api/panel/oauth'))
+    const data = response.body.data
+    assert.equal(data.engine, 'cli')
+    assert.equal(data.kernel, null)
+    assert.equal(data.ok, true, '有凭证的 CLI 引擎槽是健康的')
+    assert.equal(data.credential.has_access, true)
+    assert.equal(data.credential.email, null) // 夹具没写 email
+  } finally {
+    closeDatabase()
+    for (const [key, value] of Object.entries({
+      KIN_DB_PATH: prev.db,
+      KIN_CODEX_ENGINE: prev.engine,
+      KIN_CODEX_BIN: prev.bin,
+    })) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
 
