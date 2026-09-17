@@ -22,7 +22,7 @@ import {
   vmCost,
   weeklySplitInfo,
 } from '@/lib/fable-status'
-import { usedPctOf, usedPctOrNull } from '@/lib/format'
+import { usedPctOrNull } from '@/lib/format'
 import { compactEmail, isCodexVm } from '@/lib/vm-kind'
 import {
   accountStatus,
@@ -204,9 +204,8 @@ export function VmDetailPage() {
     utilization_7d: acc.utilization_7d ?? vm.utilization_7d,
     codex_usage: (acc.codex_usage as Vm['codex_usage']) || vm.codex_usage,
   }
-  const u5 = usedPctOf(quotaSrc, '5h')
-  const u7 = usedPctOf(quotaSrc, '7d')
-  // codex 面板要区分"没用过"和"没这个窗口"
+  // 全前端统一按百分比（0..100）传：codex 卡片的 Meter 直接吃这个值。
+  // 用 null-aware 版本是因为"这个套餐没有 5 小时窗口"和"用了 0%"是两件事。
   const u5n = usedPctOrNull(quotaSrc, '5h')
   const u7n = usedPctOrNull(quotaSrc, '7d')
   const tierKey = claudeTier(vm).key
@@ -332,8 +331,8 @@ export function VmDetailPage() {
             acc={acc}
             proxy={proxy}
             dash={dash}
-            u5={u5}
-            u7={u7}
+            u5={u5n}
+            u7={u7n}
             tierKey={tierKey}
             now={now}
             cost={cost}

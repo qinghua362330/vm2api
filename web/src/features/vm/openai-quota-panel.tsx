@@ -25,7 +25,10 @@ export function OpenaiQuotaPanel({
   now,
 }: {
   vm: Vm
-  /** 比例（0..1）；null = 这个套餐没有该窗口，或还没取到快照 */
+  /**
+   * 已用百分比（0..100，来自 usedPctOrNull）；null = 这个套餐没有该窗口。
+   * 别在这里再乘 100 —— 上游给的已经是百分比，乘一次就成 6200%，Meter 夹到 100%。
+   */
   u5: number | null
   u7: number | null
   now: number
@@ -93,7 +96,7 @@ export function OpenaiQuotaPanel({
         <>
           <Meter
             label='5 小时已用'
-            value={u5 * 100}
+            value={u5}
             hint={vm.status_5h ? String(vm.status_5h) : undefined}
           />
           <div className='text-[11px] text-muted-foreground'>
@@ -109,7 +112,7 @@ export function OpenaiQuotaPanel({
         <>
           <Meter
             label='7 天已用'
-            value={u7 * 100}
+            value={u7}
             hint={vm.status_7d ? String(vm.status_7d) : undefined}
           />
           <div className='text-[11px] text-muted-foreground'>

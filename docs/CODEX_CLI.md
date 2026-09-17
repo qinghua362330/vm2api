@@ -169,6 +169,7 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 | 请求卡 5 分钟无输出 | 透明出口网关从没为 codex 起过，且 `ALL_PROXY` 造成双重代理 → 先 `ensureProxyEgress`，不再注入代理变量 |
 | 客户端收到两条失败帧 | CLI 同时发 `error` 与 `turn.failed`，翻译层去重 |
 | 面板上额度永远 `0% / —`，上游其实回了 62% | `persistCodexQuotaSnapshot` 存的是**已算好的 view**，`summarizeCodexSlot` 读出来又喂回 `buildCodexUsageView`；老实现只认顶层 `primary_used_percent`，把 view 当 extra 解析 → 全 null。`snapshotOf()` 现在显式识别 view/snapshot/extra 三种输入 |
+| 槽详情显示 `7 天已用 100%`，列表却显示 `62.0%` | 单位不一致：卡片以为入参是 0..1 的比例又乘了 100（62 → 6200%，`Meter` 夹到 100%）。现在全前端统一按**百分比（0..100）**传递，归一化只在 `usedPctOf` / `usedPctOrNull` 里发生 |
 
 ## 额度显示（为什么有时候是"—"）
 
@@ -187,8 +188,12 @@ SOCKS5 出去。面板上三处会显示它：槽详情的额度卡、`5 小时 
 失败不占节流窗口，下一次请求还会再试；拉取报错只写日志，不影响面板响应。
 
 `null` 和 `0%` 是两件事：`null` 表示**这个套餐没有这个窗口**（Codex 的 7 天-only 套餐就是
-这样），面板显示「5 小时窗口：该套餐没有…」；`0%` 才是"一点没用"。`usedPctOrNull()` 负责
-区分，别再让 `Number(value) || 0` 把它压成 0% 的进度条。
+这样），面板显示「5 小时窗口：该套餐没有…」、列表显示 `—`；`0%` 才是"一点没用"。
+`usedPctOrNull()` 负责区分，别再让 `Number(value) || 0` 把它压成 0% 的进度条。
+
+**单位只有一种：百分比（0..100）。** `usedPctOf()` / `usedPctOrNull()` 是唯一的归一化点
+（同时容忍上游给 `0.62` 或 `62`），下游组件直接画，**不要再乘 100** —— 乘第二次就是
+「详情 100%、列表 62%」那个 bug（`quota-scale-contract.test.ts` 会拦住它）。
 
 ## 模型清单是账号驱动的
 

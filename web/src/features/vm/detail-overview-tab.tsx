@@ -19,8 +19,9 @@ type VmOverviewTabProps = {
   acc: Record<string, unknown>
   proxy: VmProxySnap
   dash: { data: Dashboard | undefined }
-  u5: number
-  u7: number
+  /** 已用百分比（0..100）；codex 侧可能是 null（该套餐没有这个窗口） */
+  u5: number | null
+  u7: number | null
   tierKey: string
   now: number
   cost: VmCostSummary

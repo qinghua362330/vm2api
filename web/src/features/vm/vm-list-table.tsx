@@ -3,7 +3,13 @@ import type { UsageAccountRow } from '@/types/panel-usage'
 import type { Vm } from '@/types/panel-vm'
 import type { StatusTone } from '@/types/status'
 import { fableState, fmtResetClock } from '@/lib/fable-status'
-import { fmtNum, fmtUsd, remainPct, usedPctOf } from '@/lib/format'
+import {
+  fmtNum,
+  fmtUsd,
+  remainPct,
+  usedPctOf,
+  usedPctOrNull,
+} from '@/lib/format'
 import { tierVisual } from '@/lib/tier-visual'
 import { cn } from '@/lib/utils'
 import { isCodexVm } from '@/lib/vm-kind'
@@ -26,9 +32,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { PlatformChip, SlotIdentity } from '@/components/platform-chip'
-import { OpenaiPlanBadge } from '@/features/vm/openai-plan-badge'
 import { StatusMark } from '@/components/status-mark'
 import { ProxyChip } from '@/features/proxies/proxy-chip'
+import { OpenaiPlanBadge } from '@/features/vm/openai-plan-badge'
 import { SchedulableSwitch } from '@/features/vm/schedulable-switch'
 import {
   StatusBarOptions,
@@ -188,22 +194,32 @@ function UsageTrack({
   detail,
 }: {
   label: string
-  value: number
+  /** 已用百分比；null = 这个套餐没有这个窗口（例如 7 天-only 的 Codex 账号没有 5h） */
+  value: number | null
   resetAt?: string | null
   detail?: string | null
 }) {
+  const missing = value == null
   return (
     <div className='min-w-0 space-y-1'>
       <div className='flex items-baseline justify-between gap-1 text-base text-muted-foreground'>
         <span className='truncate'>{label}</span>
-        <span className={cn('font-medium tabular-nums', RISK_FG(value))}>
-          {value.toFixed(1)}%
+        <span
+          className={cn(
+            'font-medium tabular-nums',
+            missing ? 'text-muted-foreground' : RISK_FG(value)
+          )}
+        >
+          {missing ? '—' : `${value.toFixed(1)}%`}
         </span>
       </div>
       <Progress
-        value={value > 0 ? Math.min(100, Math.max(1.5, value)) : 0}
+        value={missing || value <= 0 ? 0 : Math.min(100, Math.max(1.5, value))}
         className='h-1.5 track-recessed'
-        indicatorClassName={cn(RISK_BAR(value), 'rounded-full')}
+        indicatorClassName={cn(
+          missing ? 'bg-[color:var(--status-none)]' : RISK_BAR(value),
+          'rounded-full'
+        )}
       />
       {resetAt ? (
         <div className='font-mono text-sm text-muted-foreground tabular-nums'>
@@ -414,8 +430,9 @@ function WeekReqCell({ week }: { week: VmWeekOutcome }) {
 
 function UsageCell({ vm, week }: { vm: Vm; week: VmWeekOutcome }) {
   const hasToken = Boolean(vm.has_token)
-  const u5 = usedPctOf(vm, '5h')
-  const u7 = usedPctOf(vm, '7d')
+  // Codex 的窗口是按套餐给的：不存在的窗口显示 "—"，画成 0.0% 会被读成"额度没用过"
+  const u5 = isCodexVm(vm) ? usedPctOrNull(vm, '5h') : usedPctOf(vm, '5h')
+  const u7 = isCodexVm(vm) ? usedPctOrNull(vm, '7d') : usedPctOf(vm, '7d')
   const fable = isCodexVm(vm) ? null : fableRow(vm)
   const reset5 = hasToken ? fmtResetClock(vm.reset_5h) : null
   const reset7 = hasToken ? fmtResetClock(vm.reset_7d) : null
