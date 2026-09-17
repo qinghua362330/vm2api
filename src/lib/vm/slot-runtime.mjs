@@ -139,11 +139,19 @@ export async function ensureSlotInferenceRuntime(vm, projectRoot, opts = {}) {
     if (!eager) return { ok: true, skipped: true, reason: 'eager_start_off', engine: 'codex' }
     const write = opts.ops?.writeCodexKernelConfig || writeCodexKernelConfig
     const start = opts.ops?.ensureCodexKernel || ensureCodexKernel
+    // 容器在跑就按容器坐标写配置、把 kernel 起在容器里（与 Claude 的 kernel 同构）；
+    // 没有容器才回退宿主进程。
+    const container = codexContainerInUse(vm, opts.ops)
     write(projectRoot, vm, {
       proxyUrl: boundProxyUrl(vm?.proxy),
       proxyRequired: true,
+      inContainer: !!container,
     })
-    const kernel = await start(slotExec(projectRoot, vm), { timeoutMs: opts.timeoutMs })
+    const kernel = await start(slotExec(projectRoot, vm), {
+      timeoutMs: opts.timeoutMs,
+      container,
+      ops: opts.ops,
+    })
     if (!kernel?.ok) {
       return {
         ok: false,
@@ -213,6 +221,21 @@ async function attachInferenceRuntime(boot, vm, projectRoot, opts = {}) {
     ...boot,
     rust,
     rust_ok: rust?.ok !== false || rust?.skipped === true,
+  }
+}
+
+/**
+ * 这个 codex 槽此刻该按容器模式处理吗：容器存在且在跑才算。
+ * `opts.ops.inspectCodexContainer` 供测试注入。
+ */
+export function codexContainerInUse(vm, ops = {}) {
+  const name = String(vm?.runtime?.container || codexContainerName(vm?.id) || '').trim()
+  if (!name) return null
+  const inspect = ops?.inspectCodexContainer || inspectCodexContainer
+  try {
+    return inspect(name)?.running ? name : null
+  } catch {
+    return null
   }
 }
 

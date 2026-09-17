@@ -258,3 +258,158 @@ test('execInCodexSlot 用 docker exec -i 进容器，并把 stdin 关掉', () =>
     fs.rmSync(project, { recursive: true, force: true })
   }
 })
+
+// ── kernel 也进容器：配置坐标与启动方式都要对齐 Claude ──────────────────────
+
+test('容器模式写下的 kernel 配置用容器坐标，代理留空', async () => {
+  const { writeCodexKernelConfig, CODEX_KERNEL_SOCKET_IN_CONTAINER, CODEX_KERNEL_CONFIG_IN_CONTAINER } = await import(
+    '../../src/lib/transport/codex-kernel-supervisor.mjs'
+  )
+  const project = tmp()
+  try {
+    const { vm } = codexSlot(project)
+    const written = writeCodexKernelConfig(project, vm, {
+      proxyUrl: 'socks5h://127.0.0.1:1087',
+      proxyRequired: true,
+      inContainer: true,
+    })
+    const config = JSON.parse(fs.readFileSync(written.configPath, 'utf8'))
+    assert.equal(config.socket_path, CODEX_KERNEL_SOCKET_IN_CONTAINER)
+    assert.equal(config.credential_path, '/home/kincli/.codex/credentials.json')
+    // 容器里的 127.0.0.1 是它自己：宿主那串 SOCKS 地址进去只会连到自己
+    assert.equal(config.proxy_url, '')
+    assert.equal(config.proxy_required, false)
+    // kernel 的 accounts 格式被放进槽 home（与 Claude 把凭证放 cli-home 同一信任级别）
+    const creds = JSON.parse(
+      fs.readFileSync(path.join(project, 'vms', 'vm-7', 'codex-home', 'credentials.json'), 'utf8'),
+    )
+    assert.equal(creds.accounts[0].chatgpt_account_id, 'acc-7')
+    assert.equal(fs.statSync(path.join(project, 'vms', 'vm-7', 'codex-home', 'credentials.json')).mode & 0o777, 0o600)
+    // 宿主模式不受影响：仍是宿主路径 + 代理必填
+    const hostMode = JSON.parse(
+      fs.readFileSync(
+        writeCodexKernelConfig(project, vm, { proxyUrl: 'socks5h://127.0.0.1:1087', proxyRequired: true }).configPath,
+        'utf8',
+      ),
+    )
+    assert.equal(hostMode.socket_path, path.join(project, 'vms', 'vm-7', 'run', 'codex-kernel.sock'))
+    assert.equal(hostMode.proxy_url, 'socks5h://127.0.0.1:1087')
+    assert.equal(hostMode.proxy_required, true)
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('容器在跑时 kernel 起在容器里（docker exec -d），没有容器才回退宿主', async () => {
+  const { ensureCodexKernel, writeCodexKernelConfig, CODEX_KERNEL_BIN_IN_CONTAINER, CODEX_KERNEL_CONFIG_IN_CONTAINER } =
+    await import('../../src/lib/transport/codex-kernel-supervisor.mjs')
+  const project = tmp()
+  try {
+    const { vm } = codexSlot(project)
+    const written = writeCodexKernelConfig(project, vm, { inContainer: true })
+    const exec = { vmId: vm.id, vm, homeDir: path.join(project, 'vms', vm.id, 'codex-home') }
+
+    const calls = []
+    const result = await ensureCodexKernel(exec, {
+      timeoutMs: 200,
+      container: 'kin-7',
+      ops: {
+        dockerExec: (container, argv) => {
+          calls.push([container, ...argv])
+          return { ok: true }
+        },
+      },
+    })
+    assert.deepEqual(calls[0], ['kin-7', CODEX_KERNEL_BIN_IN_CONTAINER, CODEX_KERNEL_CONFIG_IN_CONTAINER])
+    assert.equal(result.started_in, 'container')
+    // 容器里起完仍走同一条 socket 做健康检查 —— 超时说明它在等容器内进程，而不是拼错路径
+    assert.equal(result.ok, false)
+    assert.equal(result.reason, 'health_timeout')
+
+    // 没有容器：回退宿主 spawn（且不再走 docker）
+    const spawned = []
+    const hostResult = await ensureCodexKernel(exec, {
+      timeoutMs: 150,
+      ops: {
+        dockerExec: () => assert.fail('must not docker exec without a container'),
+        spawn: (bin, args) => {
+          spawned.push([bin, args])
+          return { unref() {}, killed: false }
+        },
+      },
+    })
+    if (spawned.length) {
+      assert.equal(spawned[0][1][0], written.configPath.replace(/codex-kernel\.json$/, 'codex-kernel.json'))
+      assert.equal(hostResult.started_in, 'host')
+    } else {
+      // 本机没有编好的 kernel 二进制时只会停在 bin_missing，这也是正确行为
+      assert.equal(hostResult.reason, 'bin_missing')
+    }
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+// ── 建槽：codex 可以直接建，落户走 codex-home ────────────────────────────────
+
+test('seedSlotHome 按类型分派：codex 建 codex-home，Claude 建 cli-home', async () => {
+  const { seedSlotHome } = await import('../../src/lib/vm/vm-recreate.mjs')
+  const project = tmp()
+  try {
+    const codexVm = { id: 'vm-31', platform: 'openai', family: 'codex', codex_kernel: true }
+    const seeded = seedSlotHome(project, codexVm)
+    assert.equal(seeded.ok, true)
+    assert.equal(seeded.homeDir, path.join(project, 'vms', 'vm-31', 'codex-home'))
+    assert.equal(fs.statSync(seeded.homeDir).mode & 0o777, 0o700)
+    assert.equal(
+      fs.existsSync(path.join(project, 'vms', 'vm-31', 'cli-home')),
+      false,
+      'codex 槽不该有 Claude 的 cli-home',
+    )
+    // 不预写 auth.json / config.toml：凭证等导入或槽启动时由宿主写，配置不猜键
+    assert.equal(fs.existsSync(path.join(seeded.homeDir, 'auth.json')), false)
+    assert.equal(fs.existsSync(path.join(seeded.homeDir, 'config.toml')), false)
+
+    // Claude 槽仍走原来的 cli-home
+    const claudeVm = { id: 'vm-32', claude: { account_uuid: 'a' } }
+    const claudeSeed = seedSlotHome(project, claudeVm)
+    assert.equal(claudeSeed.homeDir, path.join(project, 'vms', 'vm-32', 'cli-home'))
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('重建 codex 槽：清空后重新落户 codex-home，且不遗留 cli-home', async () => {
+  const { recreateVmFiles } = await import('../../src/lib/vm/vm-recreate.mjs')
+  const project = tmp()
+  try {
+    const prev = {
+      id: 'vm-41',
+      kernel: 'ubuntu-24.04',
+      platform: 'openai',
+      family: 'codex',
+      codex_kernel: true,
+      fingerprint: { guest_machine_id: '0123456789abcdef0123456789abcdef' },
+      policy: { maxConcurrency: 4, weight: 1 },
+    }
+    fs.mkdirSync(path.join(project, 'vms', 'vm-41'), { recursive: true })
+    fs.writeFileSync(path.join(project, 'vms', 'vm-41.json'), JSON.stringify(prev))
+    // 重建前槽里有旧的 codex 会话文件
+    seedSlotHomeFor(project, 'vm-41')
+
+    const { vm } = recreateVmFiles(project, prev)
+    assert.equal(vm.id, 'vm-41')
+    assert.equal(vm.codex_kernel, true, '重建后仍是 codex 槽')
+    assert.equal(fs.existsSync(path.join(project, 'vms', 'vm-41', 'codex-home')), true)
+    assert.equal(fs.existsSync(path.join(project, 'vms', 'vm-41', 'cli-home')), false)
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+function seedSlotHomeFor(project, id) {
+  const home = path.join(project, 'vms', id, 'codex-home')
+  fs.mkdirSync(home, { recursive: true })
+  fs.writeFileSync(path.join(home, 'history.jsonl'), '{"old":true}\n')
+  return home
+}

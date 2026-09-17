@@ -139,7 +139,11 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 | 机器身份 | `/etc/machine-id` + `/var/lib/dbus/machine-id` 只读挂载（`ensureGuestMachineIdFile`） | 同一个函数、同一个目标路径 |
 | 资源限制 | 只读根、tmpfs、`--memory`/`--pids-limit`、`no-new-privileges`、`--cap-drop ALL` | 逐条相同 |
 | 挂载 | `cli-home` → `/home/kincli` + `kin-kernel`/`kin-worker` | `codex-home` → `/home/kincli/.codex`（CODEX_HOME）+ `bin/codex` → `/usr/local/bin/codex:ro` |
-| 容器内常驻 | `kin-kernel --gateway-worker`（PID 1） | 无常驻网关：`sleep infinity` 待命，CLI 由驱动 `docker exec -i` 进来跑 |
+| 容器内常驻 | `kin-kernel --gateway-worker`（PID 1） | `sleep infinity` 待命；CLI 由驱动 `docker exec -i` 进来跑 |
+| kernel | 容器内 `kin-kernel`，config/socket 走 `/run/kin` | 容器内 `kin-codex-kernel`（`docker exec -d` 起，和 telemetry worker 同一种起法），config/socket 同样走 `/run/kin` |
+| kernel 配置坐标 | `socket_path: /run/kin/kernel.sock`、`proxy_url: ''`、`proxy_required: false` | **同一套写法**：`/run/kin/codex-kernel.sock`、`proxy_url: ''`、`proxy_required: false`（容器里的 `127.0.0.1` 是它自己，宿主那串 SOCKS 地址进去只会连到自己；槽的出口由透明网络承担） |
+| kernel 凭证 | `cli-home/.claude/credentials.json` | `codex-home/credentials.json`（kernel 自己的 accounts 格式，与 CLI 的 `auth.json` 分开、同级信任） |
+| 建槽 | `/api/panel/vms/create` → `seedFreshCliHome` | 同一个路由，`kind=codex` → `seedCodexSlotHome`（只建空的 codex-home；凭证等导入或启动时宿主写） |
 
 启动前 `preflightCodexSlot()` 会把缺的东西一次说清（`codex_bin` / `codex_credential_missing`
 / `slot_network` / `image_missing`），而不是 `docker run` 到一半才炸 —— 只读根 + 只读挂载
@@ -153,8 +157,7 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 
 ## 尚未做（下一步）
 
-1. codex kernel 也移进容器（现在宿主 socket 服务；Claude 侧的内核在容器里），
-   让 socket 与 kernel 生命周期完全对齐；
-2. 面板支持直接新建 codex 槽（现在仍需"先建 Claude 槽再导入 codex 凭证"）；
-3. 常驻 `codex app-server`（省掉每请求冷启动）；
-4. codex 配额闸门（`GetAccountRateLimits`）与计费。
+1. 常驻 `codex app-server`（省掉每请求冷启动）；
+2. codex 配额闸门（`GetAccountRateLimits`）与计费；
+3. 建槽向导里把类型做成显式选项（现在 `kind=codex` 已可用，前端入口还是"导入凭证"
+   那条路）。

@@ -9,7 +9,7 @@ import { atomicWriteJson } from './vm-file.mjs'
 import { defaultSeedPolicy } from '../protocol/seed-policy.mjs'
 import { writeSlotSeedFiles } from './slot-seed.mjs'
 import { manualScheduleLevelOf } from '../pool/credential-weight.mjs'
-import { stampVmKind } from './vm-kind.mjs'
+import { isCodexVm, stampVmKind } from './vm-kind.mjs'
 import { materializeWrapCli } from './wrap-cli-runtime.mjs'
 import { listVms } from './vm-registry.mjs'
 import {
@@ -37,6 +37,27 @@ export function seedFreshCliHome(projectRoot, vm) {
     materializeWrapCli(projectRoot, vm)
   } catch {}
   return { homeDir: written.homeDir, seed_policy: written.seed_policy || defaultSeedPolicy(vm.seed_policy || {}) }
+}
+
+/**
+ * codex 槽的"落户"：与 `seedFreshCliHome` 平级，只是槽里是 codex 的世界。
+ *
+ * 只建一槽一份的 CODEX_HOME（凭证、会话、app-server 控制 socket 都住这儿），不写
+ * `auth.json` —— 那要等凭证导入或槽启动时由宿主写（`ensureCodexSlotHome`），跟 Claude
+ * 侧"先建空 home、再导凭证"是同一个顺序。配置也不预写：CLI 有 `--strict-config`，
+ * 猜 TOML 键会把一个能跑的槽变成起不来的槽。
+ */
+export function seedCodexSlotHome(projectRoot, vm) {
+  const id = String(vm?.id || '').trim()
+  if (!projectRoot || !id) return { ok: false, reason: 'project_and_vm_required' }
+  const home = path.join(projectRoot, 'vms', id, 'codex-home')
+  fs.mkdirSync(home, { recursive: true, mode: 0o700 })
+  return { ok: true, homeDir: home }
+}
+
+/** 按槽的类型落户：Claude 走 cli-home，codex 走 codex-home。 */
+export function seedSlotHome(projectRoot, vm) {
+  return isCodexVm(vm) ? seedCodexSlotHome(projectRoot, vm) : seedFreshCliHome(projectRoot, vm)
 }
 
 export function buildRecreatedVmRecord(prev, generated) {
@@ -92,6 +113,12 @@ export function buildRecreatedVmRecord(prev, generated) {
   return next
 }
 
+/**
+ * 重建槽的文件。codex 槽同一套语义：清空槽目录 → 重生成指纹 → 重新落户。
+ * codex 的凭证不在槽 home 里（`vms/<id>/codex-credentials.json` 在 home 之外，
+ * `wipeSlotHome` 删的是 `vms/<id>/` 整个目录 —— 所以凭证需要调用方在重建后重新导入，
+ * 与 Claude 的 cli-home 被清掉后要重导凭证完全一致）。
+ */
 export function recreateVmFiles(projectRoot, prev) {
   if (!projectRoot || !prev?.id) throw new Error('projectRoot and vm id required')
   wipeSlotHome(projectRoot, prev.id)
@@ -102,6 +129,6 @@ export function recreateVmFiles(projectRoot, prev) {
   const vmPath = path.join(projectRoot, 'vms', `${prev.id}.json`)
   atomicWriteJson(vmPath, vm, { mode: 0o600 })
   writeGuestMachineIdFile(projectRoot, vm.id, vm.fingerprint.guest_machine_id)
-  seedFreshCliHome(projectRoot, vm)
+  seedSlotHome(projectRoot, vm)
   return { vm, vmPath }
 }

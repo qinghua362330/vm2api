@@ -25,11 +25,13 @@ import { runtimeKind } from './runtime-kind.mjs'
 import { ensureGuestMachineIdFile } from '../identity/workstation-fingerprint.mjs'
 import { slotNetworkForVm } from './egress.mjs'
 import { codexHomeDir, materializeCodexHome } from './codex-home.mjs'
+import { codexKernelBinPath } from '../transport/codex-kernel-supervisor.mjs'
 import { readCodexAccounts } from './codex-slot.mjs'
 
 export const CODEX_RUNTIME = 'docker'
 export const CODEX_HOME_IN_CONTAINER = '/home/kincli/.codex'
 export const CODEX_BIN_IN_CONTAINER = '/usr/local/bin/codex'
+export const CODEX_KERNEL_BIN_IN_CONTAINER = '/usr/local/bin/kin-codex-kernel'
 const GID = String(process.env.KIN_VM_GID || 987)
 const UID_BASE = Number(process.env.KIN_VM_UID_BASE || 10000)
 const SLOT_MEMORY = process.env.KIN_VM_MEMORY || '500m'
@@ -153,18 +155,30 @@ export function startCodexSlotRuntime(
 ) {
   const name = codexContainerName(vm.id)
   const homeInSlot = codexHomeDir(projectRoot, vm.id)
+  // 声明在最前面：下面的"已在跑/已停止"早返回分支也要用它
+  const kernelBin = String(process.env.KIN_CODEX_KERNEL_BIN || '').trim() || codexKernelBinPath() || ''
   const pre = preflightCodexSlot({ projectRoot, vm, codexBin, image, shImpl })
   if (!pre.ok) return { ok: false, error: pre.error, missing: pre.missing }
 
   const existing = inspectImpl(name, { shImpl })
   if (existing?.running) {
-    return { ok: true, action: 'running', runtime: runtimePatchOf(vm, existing), preflight: pre }
+    return {
+      ok: true,
+      action: 'running',
+      runtime: runtimePatchOf(vm, existing, { kernelMounted: !!kernelBin }),
+      preflight: pre,
+    }
   }
   if (existing) {
     const started = shImpl(['docker', 'start', name])
     if (!started.ok) return { ok: false, error: started.stderr || 'docker start failed' }
     const info = inspectImpl(name, { shImpl })
-    return { ok: true, action: 'started', runtime: runtimePatchOf(vm, info), preflight: pre }
+    return {
+      ok: true,
+      action: 'started',
+      runtime: runtimePatchOf(vm, info, { kernelMounted: !!kernelBin }),
+      preflight: pre,
+    }
   }
 
   const machineIdFile = ensureGuestMachineIdFile(projectRoot, vm)
@@ -214,6 +228,9 @@ export function startCodexSlotRuntime(
     // CLI 二进制只读挂载：和 kin-worker / kin-kernel 一个套路，不往每个槽里复制 200MB
     '-v',
     `${pre.bin}:${CODEX_BIN_IN_CONTAINER}:ro`,
+    // kernel 二进制同理：存在才挂（与 Claude 的 kin-kernel 挂载条件一致），
+    // 挂上之后 kernel 就在槽里跑，配置/socket 经 /run/kin 共享
+    ...(kernelBin ? ['-v', `${kernelBin}:${CODEX_KERNEL_BIN_IN_CONTAINER}:ro`] : []),
     ...machineMounts,
     '-e',
     `CODEX_HOME=${CODEX_HOME_IN_CONTAINER}`,
@@ -244,7 +261,12 @@ export function startCodexSlotRuntime(
   const r = shImpl(args)
   if (!r.ok) return { ok: false, error: r.stderr || r.stdout || 'docker run failed' }
   const info = inspectImpl(name, { shImpl })
-  return { ok: true, action: 'created', runtime: runtimePatchOf(vm, info), preflight: pre }
+  return {
+    ok: true,
+    action: 'created',
+    runtime: runtimePatchOf(vm, info, { kernelMounted: !!kernelBin }),
+    preflight: pre,
+  }
 }
 
 function displayHostname(vmId) {
@@ -258,7 +280,7 @@ function proxyEnv(vm) {
   return ''
 }
 
-function runtimePatchOf(vm, info) {
+function runtimePatchOf(vm, info, { kernelMounted = false } = {}) {
   const kernel = vm.kernel || 'ubuntu-24.04'
   const meta = {
     'ubuntu-24.04': 'kin-os/ubuntu:24.04',
@@ -279,6 +301,7 @@ function runtimePatchOf(vm, info) {
     hostname: info?.hostname || displayHostname(vm.id),
     codex_home: CODEX_HOME_IN_CONTAINER,
     codex_bin: CODEX_BIN_IN_CONTAINER,
+    codex_kernel_bin: kernelMounted ? CODEX_KERNEL_BIN_IN_CONTAINER : null,
   }
 }
 

@@ -170,7 +170,7 @@ import {
   switchInheritedInferenceEngines,
   slotExec,
 } from '../vm/slot-runtime.mjs'
-import { recreateVmFiles, seedFreshCliHome } from '../vm/vm-recreate.mjs'
+import { recreateVmFiles, seedFreshCliHome, seedSlotHome } from '../vm/vm-recreate.mjs'
 import { writeSlotSeedFiles } from '../vm/slot-seed.mjs'
 import { egressEnabled, ensureProxyEgress, stopProxyEgress, boundProxyUrl } from '../vm/egress.mjs'
 import { collectSlotIdentity } from '../vm/guest-identity.mjs'
@@ -3055,10 +3055,12 @@ export function createPanelHandler(ctx) {
           vm.origin = VM_ORIGIN.platform
         }
         stampVmKind(vm, body)
+        // 建槽时就定下类型：codex 槽不需要先建一个 Claude 槽再导入凭证。
+        // 落户函数按类型分派（claude → cli-home，codex → codex-home）。
         atomicWriteJson(vmPath, vm, { mode: 0o600 })
         writeGuestMachineIdFile(cfg.paths.project, id, generated.guest_machine_id)
         try {
-          seedFreshCliHome(cfg.paths.project, vm)
+          seedSlotHome(cfg.paths.project, vm)
         } catch (e) {}
         let allocated = null
         const wantProxy = body.auto_allocate_proxy === true || startNow
