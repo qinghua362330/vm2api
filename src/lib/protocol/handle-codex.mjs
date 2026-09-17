@@ -138,12 +138,36 @@ export function pickCodexVm(projectRoot, req, { gates = {}, ownerScope = null, v
 }
 
 /** 槽容器在不在跑：在跑就把 CLI 放进容器执行。 */
+/**
+ * 这个槽的 codex 容器（在跑，而且**形状对**）。
+ *
+ * 容器名字两边共用：Claude 运行时也叫 `kin-<n>`。槽从 Claude 转成 codex 之后，旧容器
+ * 还占着这个名字，里面挂的是 cli-home + kin-worker —— 于是每个请求都变成
+ * `OCI runtime exec failed: ... "/usr/local/bin/codex": no such file or directory`。
+ * 所以这里不只看"在不在跑"，还要看标签：`kin.vm.kind=codex` 才算数。
+ */
 export function codexSlotContainer(vm, { inspect = inspectCodexContainer } = {}) {
   const name = vm?.runtime?.container || codexContainerName(vm?.id)
   if (!name) return null
   try {
     const info = inspect(name)
-    return info?.running ? name : null
+    if (!info?.running) return null
+    if (info.kind != null || info.vmId != null) return info.kind === 'codex' ? name : null
+    return name
+  } catch {
+    return null
+  }
+}
+
+/** 在跑但不是 codex 形状：单独说清楚，别让调用方以为"槽没起"。 */
+export function codexContainerShapeMismatch(vm, { inspect = inspectCodexContainer } = {}) {
+  const name = vm?.runtime?.container || codexContainerName(vm?.id)
+  if (!name) return null
+  try {
+    const info = inspect(name)
+    if (!info?.running) return null
+    const labeled = info.kind != null || info.vmId != null
+    return labeled && info.kind !== 'codex' ? { container: name, kind: info.kind || 'claude' } : null
   } catch {
     return null
   }
@@ -372,12 +396,18 @@ export async function handleCodexProtocol({
       cliRunner = { container, bin: CODEX_BIN_IN_CONTAINER, docker: 'docker' }
     } else if (codex.allow_host_cli !== true) {
       stats.errors++
-      logBag.error_code = 'codex_slot_not_running'
+      // "在跑但形状不对"和"没在跑"是两件事：前者是槽从 Claude 转过型留下的旧容器，
+      // 报 no such file 会让人去查二进制；后者才该让人去启动槽。
+      const mismatch = codexContainerShapeMismatch(vm)
+      const code = mismatch ? 'codex_slot_container_mismatch' : 'codex_slot_not_running'
+      logBag.error_code = code
       return json(res, 503, {
         error: {
           type: 'api_error',
-          code: 'codex_slot_not_running',
-          message: `Codex 槽容器未运行（${vm.runtime?.container || codexContainerName(vm.id)}）。先启动槽，或显式开启 routing.codex.allow_host_cli 用宿主执行。`,
+          code,
+          message: mismatch
+            ? `Codex 槽容器形状不对（${mismatch.container} 是 ${mismatch.kind} 形状的旧容器，里面没有 codex）。重启这个槽会按 codex 形状重建。`
+            : `Codex 槽容器未运行（${vm.runtime?.container || codexContainerName(vm.id)}）。先启动槽，或显式开启 routing.codex.allow_host_cli 用宿主执行。`,
         },
       })
     }

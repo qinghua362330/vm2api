@@ -74,11 +74,13 @@ export function inspectCodexContainer(name, { shImpl = sh } = {}) {
     'docker',
     'inspect',
     '--format',
-    '{{.State.Running}}|{{.State.Pid}}|{{.HostConfig.NetworkMode}}|{{.State.StartedAt}}|{{.Config.Image}}|{{.Config.Hostname}}',
+    '{{.State.Running}}|{{.State.Pid}}|{{.HostConfig.NetworkMode}}|{{.State.StartedAt}}|{{.Config.Image}}|{{.Config.Hostname}}|{{index .Config.Labels "kin.vm.kind"}}|{{index .Config.Labels "kin.vm.id"}}',
     name,
   ])
   if (!r.ok) return null
-  const [running, pid, networkMode, startedAt, image, hostname] = r.stdout.split('|')
+  const [running, pid, networkMode, startedAt, image, hostname, kind, labelVmId] = r.stdout.split('|')
+  const labelKind = String(kind || '').trim() || null
+  const labeledVmId = String(labelVmId || '').trim() || null
   return {
     name,
     running: running === 'true',
@@ -87,6 +89,14 @@ export function inspectCodexContainer(name, { shImpl = sh } = {}) {
     startedAt: startedAt || null,
     image: image || null,
     hostname: hostname || null,
+    /**
+     * 容器名字两边共用（`kin-<n>`），只有 label 能证明形状：codex 容器带
+     * `kin.vm.kind=codex`，Claude 容器只有 `kin.vm.id`（没有 kind）。两个都读出来，
+     * 才能把"没标 → 未知"和"标了但不是 codex → 形状不对"分开。
+     */
+    kind: labelKind,
+    vmId: labeledVmId,
+    codexShaped: labelKind === 'codex',
   }
 }
 
@@ -184,7 +194,27 @@ export function startCodexSlotRuntime(
   if (!pre.ok) return { ok: false, error: pre.error, missing: pre.missing }
 
   const existing = inspectImpl(name, { shImpl })
-  if (existing?.running) {
+  // 形状不对：容器名两边共用，槽从 Claude 转成 codex 时旧容器还占着这个名字，
+  // 它挂的是 cli-home + kin-worker，里面压根没有 codex 二进制 —— 于是每个请求都
+  // 变成 `OCI runtime exec failed: ... "/usr/local/bin/codex": no such file`。
+  // 这种容器不能复用，直接删掉按 codex 形状重建（幂等：下次进来形状就对了）。
+  // 只有"容器自己带了标签、但标签不是 codex"才算形状不对：测试替身/拿不到标签时
+  // 保持老行为（复用），不要凭猜测去删别人的容器。
+  const labeled = !!existing && (existing.kind != null || existing.vmId != null)
+  const wrongShape = labeled && existing.kind !== 'codex'
+  if (wrongShape) {
+    const removed = shImpl(['docker', 'rm', '-f', name])
+    if (!removed.ok) {
+      return {
+        ok: false,
+        error: `slot container exists with the wrong shape and could not be replaced: ${removed.stderr || 'docker rm failed'}`,
+        reason: 'container_shape_mismatch',
+        container: name,
+        container_kind: existing.kind || 'claude',
+      }
+    }
+  }
+  if (existing?.running && !wrongShape) {
     return {
       ok: true,
       action: 'running',
@@ -192,7 +222,7 @@ export function startCodexSlotRuntime(
       preflight: pre,
     }
   }
-  if (existing) {
+  if (existing && !wrongShape) {
     const started = shImpl(['docker', 'start', name])
     if (!started.ok) return { ok: false, error: started.stderr || 'docker start failed' }
     const info = inspectImpl(name, { shImpl })
