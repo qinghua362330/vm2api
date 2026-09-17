@@ -166,6 +166,7 @@ test('启动 codex 槽：参数与 Claude 槽逐条对齐，挂的是 codex 的�
       codexBin: bin,
       shImpl: docker.shImpl,
       inspectImpl: docker.inspectImpl,
+      ensureEgress: () => ({ ok: true, network: 'kin-eg-proxy-7' }),
     })
     // 没有槽网络时 preflight 会拒绝（下面的断言在真实环境里由 egress 提供网络名）
     if (!started.ok) {
@@ -195,8 +196,11 @@ test('启动 codex 槽：参数与 Claude 槽逐条对齐，挂的是 codex 的�
     // 会报 "config: No such file or directory"，而 Node 侧只会看到 health_timeout
     assert.match(joined, new RegExp(`-v [^ ]*vms/vm-7/run:/run/kin`))
     assert.match(joined, new RegExp(`-e CODEX_HOME=${CODEX_HOME_IN_CONTAINER}`))
-    // 出口走槽绑定的代理
-    assert.match(joined, /-e ALL_PROXY=socks5h:\/\/127\.0\.0\.1:1087/)
+    // 出口由透明网络承担：网络必须是 egress 建出来的那个，且**不能**注入 ALL_PROXY
+    // （网络已经把出站重定向到本地网关，再给一个代理地址就是双重代理，实测不通）
+    assert.match(joined, /--network kin-eg-proxy-7/)
+    assert.equal(joined.includes('ALL_PROXY'), false, '不要注入 ALL_PROXY')
+    assert.equal(joined.includes('HTTPS_PROXY'), false)
     // 没有常驻网关进程：待命的机器，等驱动 exec 进来
     assert.match(joined, /kin-os\/ubuntu:24\.04 sleep infinity$/)
     // 明确不是 Claude 形状
@@ -218,6 +222,7 @@ test('已在跑的容器不重启；停掉的容器用 docker start 复用', () 
       codexBin: bin,
       shImpl: running.shImpl,
       inspectImpl: running.inspectImpl,
+      ensureEgress: () => ({ ok: true, network: 'kin-eg-proxy-7' }),
     })
     assert.equal(reused.ok, true)
     assert.equal(reused.action, 'running')
@@ -505,6 +510,31 @@ test('codex 槽的调度标记按 codex 凭证判，不套 Claude 的检查', as
     // 没凭证：不能误判为可调度
     fs.writeFileSync(path.join(project, 'vms', 'vm-7', 'codex-credentials.json'), JSON.stringify({ accounts: [] }))
     assert.equal(summarizeCodexSlot(project, vm).has_token, false)
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('透明出口建不起来就拒绝启动（不能悄悄从宿主 IP 出去）', async () => {
+  const { startCodexSlotRuntime } = await import('../../src/lib/vm/codex-runtime.mjs')
+  const project = tmp()
+  try {
+    const { vm, bin } = codexSlot(project)
+    const docker = fakeDocker()
+    const started = startCodexSlotRuntime(vm, project, {
+      image: 'kin-os/ubuntu:24.04',
+      codexBin: bin,
+      shImpl: docker.shImpl,
+      inspectImpl: docker.inspectImpl,
+      ensureEgress: () => ({ ok: false, error: 'kin-egress did not listen' }),
+    })
+    assert.equal(started.ok, false)
+    assert.match(started.error, /kin-egress/)
+    assert.equal(
+      docker.calls.some((args) => args.slice(0, 3).join(' ') === 'docker run -d'),
+      false,
+      '出口没到位时不应创建容器',
+    )
   } finally {
     fs.rmSync(project, { recursive: true, force: true })
   }

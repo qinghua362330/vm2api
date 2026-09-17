@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { runtimeKind } from './runtime-kind.mjs'
 import { ensureGuestMachineIdFile } from '../identity/workstation-fingerprint.mjs'
-import { slotNetworkForVm } from './egress.mjs'
+import { ensureProxyEgress, slotNetworkForVm } from './egress.mjs'
 import { chownCodexHome, codexHomeDir, codexStateDir, materializeCodexHome } from './codex-home.mjs'
 import { codexKernelBinPath } from '../transport/codex-kernel-supervisor.mjs'
 import { readCodexAccounts } from './codex-slot.mjs'
@@ -157,12 +157,26 @@ export function preflightCodexSlot({ projectRoot, vm, codexBin = null, image = n
 export function startCodexSlotRuntime(
   vm,
   projectRoot,
-  { image = null, codexBin = null, shImpl = sh, inspectImpl = inspectCodexContainer, limits = null } = {},
+  {
+    image = null,
+    codexBin = null,
+    shImpl = sh,
+    inspectImpl = inspectCodexContainer,
+    limits = null,
+    // 透明出口：与 Claude 槽同一套（专属网络 + 本地 kin-egress 网关 + iptables 重定向）
+    ensureEgress = ensureProxyEgress,
+  } = {},
 ) {
   const name = codexContainerName(vm.id)
   const homeInSlot = codexHomeDir(projectRoot, vm.id)
   // 声明在最前面：下面的"已在跑/已停止"早返回分支也要用它
   const kernelBin = String(process.env.KIN_CODEX_KERNEL_BIN || '').trim() || codexKernelBinPath() || ''
+  // 出口：先把透明网关拉起来（Claude 槽在 startVmRuntime 里做同一件事）。缺这一步时容器
+  // 虽然接上了 `kin-eg-*` 网络，但那套重定向后面没有网关，而 ALL_PROXY 又是双重代理 ——
+  // 实测两头都不通（容器里 curl 直接 000）。
+  const egress = ensureEgress(projectRoot, vm.proxy)
+  if (!egress?.ok) return { ok: false, error: egress?.error || 'proxy egress unavailable' }
+  const network = egress.network || slotNetworkForVm(vm)
   const pre = preflightCodexSlot({ projectRoot, vm, codexBin, image, shImpl })
   if (!pre.ok) return { ok: false, error: pre.error, missing: pre.missing }
 
@@ -214,7 +228,7 @@ export function startCodexSlotRuntime(
     '--hostname',
     host,
     '--network',
-    pre.network,
+    network,
     '--restart',
     'unless-stopped',
     '--memory',
@@ -266,8 +280,9 @@ export function startCodexSlotRuntime(
     `KIN_VM_ID=${vm.id}`,
     '-e',
     `KIN_VM_NAME=${host}`,
-    // 出口走槽绑定的代理（和 Claude 槽同一条规则：没绑代理不启动）
-    ...(proxyEnv(vm) ? ['-e', `ALL_PROXY=${proxyEnv(vm)}`, '-e', `HTTPS_PROXY=${proxyEnv(vm)}`] : []),
+    // 出口由透明网络承担（和 Claude 槽完全一致），这里**不设** ALL_PROXY：网络已经把所有
+    // 出站重定向到本地 kin-egress 网关，再塞一个代理地址就是双重代理，而且那个地址自己
+    // 也会被重定向走 —— 实测容器里 `curl -x $ALL_PROXY` 直接失败。
     '--dns',
     '8.8.8.8',
     '--dns-opt',
