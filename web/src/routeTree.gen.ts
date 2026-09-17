@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedAnnouncementsRouteImport } from './routes/_authenticated/announcements'
 import { Route as AuthenticatedApiRouteImport } from './routes/_authenticated/api'
 import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
@@ -26,6 +27,7 @@ import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedProtocolRouteImport } from './routes/_authenticated/protocol'
 import { Route as AuthenticatedProxiesRouteImport } from './routes/_authenticated/proxies'
 import { Route as AuthenticatedRedeemRouteImport } from './routes/_authenticated/redeem'
+import { Route as AuthenticatedSubscriptionsRouteImport } from './routes/_authenticated/subscriptions'
 import { Route as AuthenticatedUsageRouteImport } from './routes/_authenticated/usage'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedWrapRouteImport } from './routes/_authenticated/wrap'
@@ -50,6 +52,12 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedAnnouncementsRoute =
+  AuthenticatedAnnouncementsRouteImport.update({
+    id: '/announcements',
+    path: '/announcements',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedApiRoute = AuthenticatedApiRouteImport.update({
   id: '/api',
   path: '/api',
@@ -120,6 +128,12 @@ const AuthenticatedRedeemRoute = AuthenticatedRedeemRouteImport.update({
   path: '/redeem',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSubscriptionsRoute =
+  AuthenticatedSubscriptionsRouteImport.update({
+    id: '/subscriptions',
+    path: '/subscriptions',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedUsageRoute = AuthenticatedUsageRouteImport.update({
   id: '/usage',
   path: '/usage',
@@ -173,6 +187,7 @@ const AuthenticatedVmIdRoute = AuthenticatedVmIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
+  '/announcements': typeof AuthenticatedAnnouncementsRoute
   '/api': typeof AuthenticatedApiRoute
   '/billing': typeof AuthenticatedBillingRoute
   '/channels': typeof AuthenticatedChannelsRoute
@@ -187,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/protocol': typeof AuthenticatedProtocolRoute
   '/proxies': typeof AuthenticatedProxiesRoute
   '/redeem': typeof AuthenticatedRedeemRoute
+  '/subscriptions': typeof AuthenticatedSubscriptionsRoute
   '/usage': typeof AuthenticatedUsageRoute
   '/users': typeof AuthenticatedUsersRoute
   '/wrap': typeof AuthenticatedWrapRoute
@@ -199,6 +215,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/announcements': typeof AuthenticatedAnnouncementsRoute
   '/api': typeof AuthenticatedApiRoute
   '/billing': typeof AuthenticatedBillingRoute
   '/channels': typeof AuthenticatedChannelsRoute
@@ -213,6 +230,7 @@ export interface FileRoutesByTo {
   '/protocol': typeof AuthenticatedProtocolRoute
   '/proxies': typeof AuthenticatedProxiesRoute
   '/redeem': typeof AuthenticatedRedeemRoute
+  '/subscriptions': typeof AuthenticatedSubscriptionsRoute
   '/usage': typeof AuthenticatedUsageRoute
   '/users': typeof AuthenticatedUsersRoute
   '/wrap': typeof AuthenticatedWrapRoute
@@ -228,6 +246,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/login': typeof LoginRoute
+  '/_authenticated/announcements': typeof AuthenticatedAnnouncementsRoute
   '/_authenticated/api': typeof AuthenticatedApiRoute
   '/_authenticated/billing': typeof AuthenticatedBillingRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
@@ -242,6 +261,7 @@ export interface FileRoutesById {
   '/_authenticated/protocol': typeof AuthenticatedProtocolRoute
   '/_authenticated/proxies': typeof AuthenticatedProxiesRoute
   '/_authenticated/redeem': typeof AuthenticatedRedeemRoute
+  '/_authenticated/subscriptions': typeof AuthenticatedSubscriptionsRoute
   '/_authenticated/usage': typeof AuthenticatedUsageRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/wrap': typeof AuthenticatedWrapRoute
@@ -258,6 +278,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/announcements'
     | '/api'
     | '/billing'
     | '/channels'
@@ -272,6 +293,7 @@ export interface FileRouteTypes {
     | '/protocol'
     | '/proxies'
     | '/redeem'
+    | '/subscriptions'
     | '/usage'
     | '/users'
     | '/wrap'
@@ -284,6 +306,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/announcements'
     | '/api'
     | '/billing'
     | '/channels'
@@ -298,6 +321,7 @@ export interface FileRouteTypes {
     | '/protocol'
     | '/proxies'
     | '/redeem'
+    | '/subscriptions'
     | '/usage'
     | '/users'
     | '/wrap'
@@ -312,6 +336,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authenticated'
     | '/login'
+    | '/_authenticated/announcements'
     | '/_authenticated/api'
     | '/_authenticated/billing'
     | '/_authenticated/channels'
@@ -326,6 +351,7 @@ export interface FileRouteTypes {
     | '/_authenticated/protocol'
     | '/_authenticated/proxies'
     | '/_authenticated/redeem'
+    | '/_authenticated/subscriptions'
     | '/_authenticated/usage'
     | '/_authenticated/users'
     | '/_authenticated/wrap'
@@ -364,6 +390,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/announcements': {
+      id: '/_authenticated/announcements'
+      path: '/announcements'
+      fullPath: '/announcements'
+      preLoaderRoute: typeof AuthenticatedAnnouncementsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/api': {
@@ -464,6 +497,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRedeemRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/subscriptions': {
+      id: '/_authenticated/subscriptions'
+      path: '/subscriptions'
+      fullPath: '/subscriptions'
+      preLoaderRoute: typeof AuthenticatedSubscriptionsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/usage': {
       id: '/_authenticated/usage'
       path: '/usage'
@@ -531,6 +571,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAnnouncementsRoute: typeof AuthenticatedAnnouncementsRoute
   AuthenticatedApiRoute: typeof AuthenticatedApiRoute
   AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
@@ -545,6 +586,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProtocolRoute: typeof AuthenticatedProtocolRoute
   AuthenticatedProxiesRoute: typeof AuthenticatedProxiesRoute
   AuthenticatedRedeemRoute: typeof AuthenticatedRedeemRoute
+  AuthenticatedSubscriptionsRoute: typeof AuthenticatedSubscriptionsRoute
   AuthenticatedUsageRoute: typeof AuthenticatedUsageRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedWrapRoute: typeof AuthenticatedWrapRoute
@@ -558,6 +600,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAnnouncementsRoute: AuthenticatedAnnouncementsRoute,
   AuthenticatedApiRoute: AuthenticatedApiRoute,
   AuthenticatedBillingRoute: AuthenticatedBillingRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
@@ -572,6 +615,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedProtocolRoute: AuthenticatedProtocolRoute,
   AuthenticatedProxiesRoute: AuthenticatedProxiesRoute,
   AuthenticatedRedeemRoute: AuthenticatedRedeemRoute,
+  AuthenticatedSubscriptionsRoute: AuthenticatedSubscriptionsRoute,
   AuthenticatedUsageRoute: AuthenticatedUsageRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedWrapRoute: AuthenticatedWrapRoute,

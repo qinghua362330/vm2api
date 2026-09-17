@@ -25,6 +25,7 @@ import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
 import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
 import { BalanceLedger } from '../billing/balance-ledger.mjs'
 import { RedeemService } from '../billing/redeem-service.mjs'
+import { SubscriptionService } from '../billing/subscription-service.mjs'
 import { AnnouncementsRepo } from '../db/repos/announcements-repo.mjs'
 import {
   autoMigrateExhausted,
@@ -672,6 +673,53 @@ export function createPanelHandler(ctx) {
         })
         return json(res, 200, panel.ok(snapshot))
       }
+      // ---- 订阅 ----
+      if (p === '/api/panel/subscriptions' || p.startsWith('/api/panel/subscriptions/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const subs = new SubscriptionService()
+        if (req.method === 'GET' && p === '/api/panel/subscriptions') {
+          return json(res, 200, panel.ok({ subscriptions: subs.overview() }))
+        }
+        if (req.method === 'POST' && p === '/api/panel/subscriptions') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          const result = subs.grant({
+            userId: body.user_id,
+            plan: body.plan,
+            days: body.days,
+            dailyQuota: body.daily_quota,
+            notes: body.notes || `by ${ident.username || 'admin'}`,
+          })
+          return json(res, result.ok ? 200 : 400, panel.ok(result))
+        }
+        const subId = p.match(/^\/api\/panel\/subscriptions\/(\d+)(\/[a-z]+)?$/)
+        if (subId) {
+          const id = Number(subId[1])
+          const sub = subId[2] || ''
+          if (req.method === 'GET' && !sub) {
+            return json(res, 200, panel.ok({ subscription: subs.get(id), window: subs.usage(subs.get(id)?.user_id) }))
+          }
+          if ((req.method === 'PATCH' || req.method === 'PUT') && !sub) {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            return json(res, 200, panel.ok({ subscription: subs.update(id, body) }))
+          }
+          if (req.method === 'POST' && sub === '/revoke') {
+            return json(res, 200, panel.ok(subs.revoke(id)))
+          }
+          if (req.method === 'DELETE' && !sub) {
+            return json(res, 200, panel.ok(subs.revoke(id)))
+          }
+        }
+        // A user's own allowance, used by the user-facing pages.
+        const byUser = p.match(/^\/api\/panel\/subscriptions\/user\/([^/]+)$/)
+        if (req.method === 'GET' && byUser) {
+          const uid = decodeURIComponent(byUser[1])
+          return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
       // ---- 余额 / 兑换码 / 公告 ----
       // Balance only ever moves through BalanceLedger, so every route here that
       // touches money writes an auditable row in the same transaction.
@@ -743,6 +791,17 @@ export function createPanelHandler(ctx) {
             code: decodeURIComponent(redeemCode[1]),
             userId: body.user_id,
           })
+          // A days-code is not money: the redeem service returns the intent and
+          // the grant happens here, so the code's lifecycle stays in one place.
+          if (result.ok && result.type === 'subscription_days') {
+            const granted = new SubscriptionService().grant({
+              userId: body.user_id,
+              days: result.applied.value,
+              dailyQuota: Number(body.daily_quota) || 0,
+              notes: `兑换码 ${result.code}`,
+            })
+            result.applied = { ...result.applied, subscription: granted.subscription || null }
+          }
           return json(res, result.ok ? 200 : 400, panel.ok(result))
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))

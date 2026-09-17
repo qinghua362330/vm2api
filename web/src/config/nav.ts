@@ -1,5 +1,6 @@
 import {
   Box,
+  CalendarClock,
   Database,
   Download,
   Gauge,
@@ -9,6 +10,7 @@ import {
   LayoutGrid,
   LineChart,
   List,
+  Megaphone,
   Monitor,
   Puzzle,
   Network,
@@ -31,6 +33,8 @@ export type ViewId =
   | 'users'
   | 'channels'
   | 'redeem'
+  | 'subscriptions'
+  | 'announcements'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -53,6 +57,8 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   users: '用户',
   channels: '渠道',
   redeem: '兑换码',
+  subscriptions: '订阅',
+  announcements: '公告',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -80,6 +86,8 @@ export const NAV_ITEMS: {
   { id: 'users', url: '/users', icon: Users },
   { id: 'channels', url: '/channels', icon: Layers },
   { id: 'redeem', url: '/redeem', icon: Ticket },
+  { id: 'subscriptions', url: '/subscriptions', icon: CalendarClock },
+  { id: 'announcements', url: '/announcements', icon: Megaphone },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },
