@@ -170,6 +170,7 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 | 客户端收到两条失败帧 | CLI 同时发 `error` 与 `turn.failed`，翻译层去重 |
 | 面板上额度永远 `0% / —`，上游其实回了 62% | `persistCodexQuotaSnapshot` 存的是**已算好的 view**，`summarizeCodexSlot` 读出来又喂回 `buildCodexUsageView`；老实现只认顶层 `primary_used_percent`，把 view 当 extra 解析 → 全 null。`snapshotOf()` 现在显式识别 view/snapshot/extra 三种输入 |
 | 槽详情显示 `7 天已用 100%`，列表却显示 `62.0%` | 单位不一致：卡片以为入参是 0..1 的比例又乘了 100（62 → 6200%，`Meter` 夹到 100%）。现在全前端统一按**百分比（0..100）**传递，归一化只在 `usedPctOf` / `usedPctOrNull` 里发生 |
+| `connect ENOENT /opt/vm2api/vms/<id>/run/worker.sock` | 拿 Claude 的协议问 codex 槽：`slotExec()` 一律拼 `cli-home`，Claude 形状的探针（oauth 状态、身份采集、额度/live 凭证采集）就去连一个**按设计不存在**的 worker.sock。现在 `slotExec()` 按类型给 `codex-home` 并带 `kind`，`workerPaths()` 对 codex exec 直接不解析 worker.sock，误用回 `codex_slot_not_go_worker` |
 
 ## 额度显示（为什么有时候是"—"）
 
@@ -194,6 +195,40 @@ SOCKS5 出去。面板上三处会显示它：槽详情的额度卡、`5 小时 
 **单位只有一种：百分比（0..100）。** `usedPctOf()` / `usedPctOrNull()` 是唯一的归一化点
 （同时容忍上游给 `0.62` 或 `62`），下游组件直接画，**不要再乘 100** —— 乘第二次就是
 「详情 100%、列表 62%」那个 bug（`quota-scale-contract.test.ts` 会拦住它）。
+
+## 槽的坐标：codex 槽没有 cli-home，也没有 worker.sock
+
+这一条值得单独写，因为它踩过两次（两次都表现成"文件不见了"）：
+
+| | Claude 槽 | codex 槽 |
+|---|---|---|
+| 宿主 home | `vms/<id>/cli-home` | `vms/<id>/codex-home` |
+| run 目录 | `vms/<id>/run` | 同一个（容器里都是 `/run/kin`） |
+| 内核 socket | `run/worker.sock`（go worker） | `run/codex-kernel.sock` |
+| 身份接口 | `/internal/identity` | 暂无（内核只提供 `/internal/v1/codex/responses`） |
+
+规矩：
+
+1. 要槽的坐标就用 `slotExec(projectRoot, vm)` —— 它按类型给 `homeDir` 并带 `kind`；
+   自己拼 `cli-home` 就是下一个 ENOENT。
+2. 要内核健康就用 `codexKernelHealth(slotExec(...))`，别用 `workerHealth`。
+3. **CLI 引擎的槽没有常驻 kernel**（每次请求 `docker exec` 跑一次 codex），所以
+   `GET /api/panel/oauth` 先解析引擎：`cli` 看凭证、`http` 才探 codex-kernel。
+   否则一个完全正常的槽会因为 kernel 探活失败被标成 `ok: false`。
+4. 面板路由遇到 codex 槽要**回一句人话**（`identity_unsupported_for_codex`、
+   `count_tokens_unsupported`…），而不是让它走到 connect 再抛裸 ENOENT ——
+   看日志的人不该靠猜。
+
+回归测试：`test/unit/codex-slot-worker-paths.test.mjs`（坐标、socket 解析、
+误用时的 code、oauth 状态、CLI 引擎健康、count_tokens/身份采集的拒绝）。
+把 `workerPaths()` 里那个守卫关掉，坐标与 ENOENT 两条立刻红。
+
+
+
+`/v1/models` 里的 GPT 部分不是写死的策略表，而是导入凭证时（以及面板"同步目录"时）
+由 `syncCodexCatalog()` 从 `chatgpt.com/backend-api/codex/models` 拉下来、写进
+`gpt_model_policy`（`source: codex`）的。`luna` / `wm` 这类 slug 会被**故意过滤**——
+Codex 账号请求它们会 400。
 
 ## 模型清单是账号驱动的
 
@@ -220,4 +255,6 @@ model=gpt-5.5  status=502  error_code=codex_cli_failed  via=codex-cli  vm_id=vm-
 1. 常驻 `codex app-server`（省掉每请求冷启动）；
 2. codex 配额闸门（`GetAccountRateLimits`）与计费；
 3. 建槽向导里把类型做成显式选项（现在 `kind=codex` 已可用，前端入口还是"导入凭证"
-   那条路）。
+   那条路）；
+4. codex 槽的身份采集：需要在 `kin-codex-kernel` 里补 `/internal/identity`
+   （现在面板如实回 `identity_unsupported_for_codex`，不再假装能采）。
