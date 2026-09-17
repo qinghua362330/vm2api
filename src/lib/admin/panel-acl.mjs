@@ -189,6 +189,20 @@ function userKeyPathAllowed(method, path) {
   return false
 }
 
+/**
+ * A tenant may see and move their own money: read their wallet, read their own
+ * orders and subscription, and start a top-up. Nothing here reaches another
+ * user's rows — the route handlers scope to req.panelUserId for role=user.
+ */
+function userWalletPathAllowed(method, path) {
+  if (path === '/api/panel/wallet' && method === 'GET') return true
+  if (path === '/api/panel/payments/mine' && method === 'GET') return true
+  if (path === '/api/panel/payments/checkout' && method === 'POST') return true
+  if (/^\/api\/panel\/payments\/orders\/[^/]+$/.test(path) && method === 'GET') return true
+  if (/^\/api\/panel\/subscriptions\/user\/[^/]+$/.test(path) && method === 'GET') return true
+  return false
+}
+
 function isUserAllowed(method, path) {
   const m = String(method || 'GET').toUpperCase()
   const p = String(path || '')
@@ -197,6 +211,9 @@ function isUserAllowed(method, path) {
   if (p.startsWith('/api/panel/vms')) return userVmPathAllowed(m, p)
   if (p.startsWith('/api/panel/proxies')) return userProxyPathAllowed(m, p)
   if (p.startsWith('/api/panel/api-keys')) return userKeyPathAllowed(m, p)
+  if (p === '/api/panel/wallet' || p.startsWith('/api/panel/payments') || p.startsWith('/api/panel/subscriptions')) {
+    return userWalletPathAllowed(m, p)
+  }
   return false
 }
 

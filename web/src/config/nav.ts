@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   LineChart,
   List,
+  Receipt,
   Megaphone,
   Monitor,
   Puzzle,
@@ -20,6 +21,7 @@ import {
   Shield,
   Ticket,
   Users,
+  Wallet,
 } from 'lucide-react'
 
 export type ViewId =
@@ -37,6 +39,8 @@ export type ViewId =
   | 'subscriptions'
   | 'announcements'
   | 'payments'
+  | 'wallet'
+  | 'ledger'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -62,6 +66,8 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   subscriptions: '订阅',
   announcements: '公告',
   payments: '充值订单',
+  wallet: '我的钱包',
+  ledger: '余额流水',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -92,6 +98,8 @@ export const NAV_ITEMS: {
   { id: 'subscriptions', url: '/subscriptions', icon: CalendarClock },
   { id: 'announcements', url: '/announcements', icon: Megaphone },
   { id: 'payments', url: '/payments', icon: CreditCard },
+  { id: 'wallet', url: '/wallet', icon: Wallet },
+  { id: 'ledger', url: '/ledger', icon: Receipt },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },

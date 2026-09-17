@@ -21,6 +21,7 @@ import { Route as AuthenticatedDatabaseRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedEgressRouteImport } from './routes/_authenticated/egress'
 import { Route as AuthenticatedImportRouteImport } from './routes/_authenticated/import'
 import { Route as AuthenticatedKeysRouteImport } from './routes/_authenticated/keys'
+import { Route as AuthenticatedLedgerRouteImport } from './routes/_authenticated/ledger'
 import { Route as AuthenticatedLogsRouteImport } from './routes/_authenticated/logs'
 import { Route as AuthenticatedModelsRouteImport } from './routes/_authenticated/models'
 import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticated/overview'
@@ -31,6 +32,7 @@ import { Route as AuthenticatedRedeemRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedSubscriptionsRouteImport } from './routes/_authenticated/subscriptions'
 import { Route as AuthenticatedUsageRouteImport } from './routes/_authenticated/usage'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
+import { Route as AuthenticatedWalletRouteImport } from './routes/_authenticated/wallet'
 import { Route as AuthenticatedWrapRouteImport } from './routes/_authenticated/wrap'
 import { Route as AuthenticatedLoadtestIndexRouteImport } from './routes/_authenticated/loadtest/index'
 import { Route as AuthenticatedLoadtestTabRouteImport } from './routes/_authenticated/loadtest/$tab'
@@ -99,6 +101,11 @@ const AuthenticatedKeysRoute = AuthenticatedKeysRouteImport.update({
   path: '/keys',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedLedgerRoute = AuthenticatedLedgerRouteImport.update({
+  id: '/ledger',
+  path: '/ledger',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedLogsRoute = AuthenticatedLogsRouteImport.update({
   id: '/logs',
   path: '/logs',
@@ -148,6 +155,11 @@ const AuthenticatedUsageRoute = AuthenticatedUsageRouteImport.update({
 const AuthenticatedUsersRoute = AuthenticatedUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedWalletRoute = AuthenticatedWalletRouteImport.update({
+  id: '/wallet',
+  path: '/wallet',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedWrapRoute = AuthenticatedWrapRouteImport.update({
@@ -202,6 +214,7 @@ export interface FileRoutesByFullPath {
   '/egress': typeof AuthenticatedEgressRoute
   '/import': typeof AuthenticatedImportRoute
   '/keys': typeof AuthenticatedKeysRoute
+  '/ledger': typeof AuthenticatedLedgerRoute
   '/logs': typeof AuthenticatedLogsRoute
   '/models': typeof AuthenticatedModelsRoute
   '/overview': typeof AuthenticatedOverviewRoute
@@ -212,6 +225,7 @@ export interface FileRoutesByFullPath {
   '/subscriptions': typeof AuthenticatedSubscriptionsRoute
   '/usage': typeof AuthenticatedUsageRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/wallet': typeof AuthenticatedWalletRoute
   '/wrap': typeof AuthenticatedWrapRoute
   '/loadtest/$tab': typeof AuthenticatedLoadtestTabRoute
   '/settings/$tab': typeof AuthenticatedSettingsTabRoute
@@ -231,6 +245,7 @@ export interface FileRoutesByTo {
   '/egress': typeof AuthenticatedEgressRoute
   '/import': typeof AuthenticatedImportRoute
   '/keys': typeof AuthenticatedKeysRoute
+  '/ledger': typeof AuthenticatedLedgerRoute
   '/logs': typeof AuthenticatedLogsRoute
   '/models': typeof AuthenticatedModelsRoute
   '/overview': typeof AuthenticatedOverviewRoute
@@ -241,6 +256,7 @@ export interface FileRoutesByTo {
   '/subscriptions': typeof AuthenticatedSubscriptionsRoute
   '/usage': typeof AuthenticatedUsageRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/wallet': typeof AuthenticatedWalletRoute
   '/wrap': typeof AuthenticatedWrapRoute
   '/': typeof AuthenticatedIndexRoute
   '/loadtest/$tab': typeof AuthenticatedLoadtestTabRoute
@@ -263,6 +279,7 @@ export interface FileRoutesById {
   '/_authenticated/egress': typeof AuthenticatedEgressRoute
   '/_authenticated/import': typeof AuthenticatedImportRoute
   '/_authenticated/keys': typeof AuthenticatedKeysRoute
+  '/_authenticated/ledger': typeof AuthenticatedLedgerRoute
   '/_authenticated/logs': typeof AuthenticatedLogsRoute
   '/_authenticated/models': typeof AuthenticatedModelsRoute
   '/_authenticated/overview': typeof AuthenticatedOverviewRoute
@@ -273,6 +290,7 @@ export interface FileRoutesById {
   '/_authenticated/subscriptions': typeof AuthenticatedSubscriptionsRoute
   '/_authenticated/usage': typeof AuthenticatedUsageRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
+  '/_authenticated/wallet': typeof AuthenticatedWalletRoute
   '/_authenticated/wrap': typeof AuthenticatedWrapRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/loadtest/$tab': typeof AuthenticatedLoadtestTabRoute
@@ -296,6 +314,7 @@ export interface FileRouteTypes {
     | '/egress'
     | '/import'
     | '/keys'
+    | '/ledger'
     | '/logs'
     | '/models'
     | '/overview'
@@ -306,6 +325,7 @@ export interface FileRouteTypes {
     | '/subscriptions'
     | '/usage'
     | '/users'
+    | '/wallet'
     | '/wrap'
     | '/loadtest/$tab'
     | '/settings/$tab'
@@ -325,6 +345,7 @@ export interface FileRouteTypes {
     | '/egress'
     | '/import'
     | '/keys'
+    | '/ledger'
     | '/logs'
     | '/models'
     | '/overview'
@@ -335,6 +356,7 @@ export interface FileRouteTypes {
     | '/subscriptions'
     | '/usage'
     | '/users'
+    | '/wallet'
     | '/wrap'
     | '/'
     | '/loadtest/$tab'
@@ -356,6 +378,7 @@ export interface FileRouteTypes {
     | '/_authenticated/egress'
     | '/_authenticated/import'
     | '/_authenticated/keys'
+    | '/_authenticated/ledger'
     | '/_authenticated/logs'
     | '/_authenticated/models'
     | '/_authenticated/overview'
@@ -366,6 +389,7 @@ export interface FileRouteTypes {
     | '/_authenticated/subscriptions'
     | '/_authenticated/usage'
     | '/_authenticated/users'
+    | '/_authenticated/wallet'
     | '/_authenticated/wrap'
     | '/_authenticated/'
     | '/_authenticated/loadtest/$tab'
@@ -467,6 +491,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKeysRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/ledger': {
+      id: '/_authenticated/ledger'
+      path: '/ledger'
+      fullPath: '/ledger'
+      preLoaderRoute: typeof AuthenticatedLedgerRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/logs': {
       id: '/_authenticated/logs'
       path: '/logs'
@@ -537,6 +568,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/wallet': {
+      id: '/_authenticated/wallet'
+      path: '/wallet'
+      fullPath: '/wallet'
+      preLoaderRoute: typeof AuthenticatedWalletRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/wrap': {
       id: '/_authenticated/wrap'
       path: '/wrap'
@@ -599,6 +637,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedEgressRoute: typeof AuthenticatedEgressRoute
   AuthenticatedImportRoute: typeof AuthenticatedImportRoute
   AuthenticatedKeysRoute: typeof AuthenticatedKeysRoute
+  AuthenticatedLedgerRoute: typeof AuthenticatedLedgerRoute
   AuthenticatedLogsRoute: typeof AuthenticatedLogsRoute
   AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
   AuthenticatedOverviewRoute: typeof AuthenticatedOverviewRoute
@@ -609,6 +648,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSubscriptionsRoute: typeof AuthenticatedSubscriptionsRoute
   AuthenticatedUsageRoute: typeof AuthenticatedUsageRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
+  AuthenticatedWalletRoute: typeof AuthenticatedWalletRoute
   AuthenticatedWrapRoute: typeof AuthenticatedWrapRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedLoadtestTabRoute: typeof AuthenticatedLoadtestTabRoute
@@ -629,6 +669,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEgressRoute: AuthenticatedEgressRoute,
   AuthenticatedImportRoute: AuthenticatedImportRoute,
   AuthenticatedKeysRoute: AuthenticatedKeysRoute,
+  AuthenticatedLedgerRoute: AuthenticatedLedgerRoute,
   AuthenticatedLogsRoute: AuthenticatedLogsRoute,
   AuthenticatedModelsRoute: AuthenticatedModelsRoute,
   AuthenticatedOverviewRoute: AuthenticatedOverviewRoute,
@@ -639,6 +680,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSubscriptionsRoute: AuthenticatedSubscriptionsRoute,
   AuthenticatedUsageRoute: AuthenticatedUsageRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
+  AuthenticatedWalletRoute: AuthenticatedWalletRoute,
   AuthenticatedWrapRoute: AuthenticatedWrapRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedLoadtestTabRoute: AuthenticatedLoadtestTabRoute,

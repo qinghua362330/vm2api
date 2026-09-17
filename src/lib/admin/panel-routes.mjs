@@ -843,6 +843,37 @@ export function createPanelHandler(ctx) {
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }
+      // ---- 钱包（自助：一个请求拿齐余额 / 流水 / 订阅 / 订单）----
+      if (req.method === 'GET' && p === '/api/panel/wallet') {
+        const ident = panelIdentity(req)
+        const admin = ident.role === 'admin' || ident.role === 'super'
+        const requested = String(url.searchParams.get('user_id') || '').trim()
+        // A tenant always reads their own wallet; only an operator may look at
+        // somebody else's.
+        const userId = admin && requested ? requested : req.panelUserId
+        if (!userId) {
+          return json(res, 400, { ok: false, error: { message: 'user_id is required', code: 'user_required' } })
+        }
+        const users = panelUsers?.repo || null
+        const record = users?.getById(userId) || null
+        const ledger = new BalanceLedger()
+        const subs = new SubscriptionService()
+        const orders = new OrderService()
+        return json(
+          res,
+          200,
+          panel.ok({
+            user_id: userId,
+            username: record?.username || ident.user || null,
+            balance: Number(record?.balance) || 0,
+            ledger: ledger.history({ userId, limit: 50 }),
+            subscription: subs.usage(userId),
+            orders: orders.list({ userId, limit: 20 }),
+            totals: ledger.totalsBySource(),
+          }),
+        )
+      }
+      // ---- 余额流水（运营视角）----
       // ---- 余额 / 兑换码 / 公告 ----
       // Balance only ever moves through BalanceLedger, so every route here that
       // touches money writes an auditable row in the same transaction.

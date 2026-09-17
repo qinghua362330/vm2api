@@ -120,3 +120,50 @@ test('ACL schedule POSTs have matching server handlers', () => {
   assert.match(serverSrc, /cooldown\\\/clear/)
   assert.match(serverSrc, /\/schedulable\$/)
 })
+
+// ── 钱包：租户可以看和动自己的钱，但碰不到别人的 ────────────────────────────
+
+test('a tenant may reach exactly the wallet routes', () => {
+  const allowed = [
+    ['GET', '/api/panel/wallet'],
+    ['GET', '/api/panel/payments/mine'],
+    ['POST', '/api/panel/payments/checkout'],
+    ['GET', '/api/panel/subscriptions/user/u1'],
+  ]
+  for (const [method, path] of allowed) {
+    assert.equal(authorizePanelRoute(method, path, 'user').ok, true, `${method} ${path} should be allowed`)
+  }
+})
+
+test('a tenant may not reach the operator money surfaces', () => {
+  const denied = [
+    ['GET', '/api/panel/payments/orders'],
+    ['GET', '/api/panel/payments/config'],
+    ['PUT', '/api/panel/payments/config'],
+    ['POST', '/api/panel/payments/orders/P1/confirm'],
+    ['GET', '/api/panel/billing/ledger'],
+    ['POST', '/api/panel/billing/adjust'],
+    ['GET', '/api/panel/users'],
+    ['POST', '/api/panel/redeem'],
+  ]
+  for (const [method, path] of denied) {
+    assert.equal(authorizePanelRoute(method, path, 'user').ok, false, `${method} ${path} should be denied`)
+  }
+})
+
+test('the operator still reaches every wallet route', () => {
+  for (const [method, path] of [
+    ['GET', '/api/panel/payments/orders'],
+    ['GET', '/api/panel/payments/config'],
+    ['PUT', '/api/panel/payments/config'],
+    ['GET', '/api/panel/billing/ledger'],
+  ]) {
+    assert.equal(authorizePanelRoute(method, path, 'admin').ok, true, `${method} ${path} should be allowed`)
+  }
+})
+
+test('an unknown path under the money prefix is not waved through', () => {
+  assert.equal(authorizePanelRoute('GET', '/api/panel/payments/whatever', 'user').ok, false)
+  assert.equal(authorizePanelRoute('DELETE', '/api/panel/wallet', 'user').ok, false)
+  assert.equal(authorizePanelRoute('POST', '/api/panel/wallet', 'user').ok, false)
+})
