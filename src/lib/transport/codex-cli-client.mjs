@@ -261,6 +261,12 @@ export function codexEventsToSse(events, state) {
       continue
     }
     if (type === 'turn.failed' || type === 'error') {
+      // CLI 一次失败会同时给 `error` 和 `turn.failed`：只发一次 response.failed，
+      // 否则客户端收到两个失败事件（实测流里就是两条一样的帧）。
+      if (state.failed) {
+        state.error = state.error || String(event.message || event.error?.message || 'codex turn failed')
+        continue
+      }
       ensureCreated()
       closeMessage()
       state.failed = true

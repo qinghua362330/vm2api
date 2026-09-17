@@ -665,3 +665,19 @@ test('提示词写进 stdin（`codex exec … -` 是读 stdin，不是 argv）',
   assert.equal(seen.argv.at(-1), '-', 'argv 结尾的 - 表示从 stdin 读')
   assert.equal(seen.stdin, 'ping', '提示词必须写进 stdin，否则 CLI 报 No prompt provided')
 })
+
+test('一次失败只发一个 response.failed（CLI 会同时给 error 与 turn.failed）', () => {
+  const state = newCodexStreamState({ id: 'resp_dup' })
+  const events = sseEvents(
+    codexEventsToSse(
+      [
+        { type: 'turn.started' },
+        { type: 'error', message: 'Selected model is at capacity.' },
+        { type: 'turn.failed', message: 'Selected model is at capacity.' },
+      ],
+      state,
+    ),
+  )
+  assert.equal(events.filter((event) => event.type === 'response.failed').length, 1)
+  assert.match(state.error, /at capacity/)
+})
