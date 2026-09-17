@@ -16,6 +16,7 @@ import { Route as AuthenticatedAnnouncementsRouteImport } from './routes/_authen
 import { Route as AuthenticatedApiRouteImport } from './routes/_authenticated/api'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
+import { Route as AuthenticatedChannelMonitorRouteImport } from './routes/_authenticated/channel-monitor'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedClusterRouteImport } from './routes/_authenticated/cluster'
 import { Route as AuthenticatedDatabaseRouteImport } from './routes/_authenticated/database'
@@ -77,6 +78,12 @@ const AuthenticatedBillingRoute = AuthenticatedBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedChannelMonitorRoute =
+  AuthenticatedChannelMonitorRouteImport.update({
+    id: '/channel-monitor',
+    path: '/channel-monitor',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedChannelsRoute = AuthenticatedChannelsRouteImport.update({
   id: '/channels',
   path: '/channels',
@@ -215,6 +222,7 @@ export interface FileRoutesByFullPath {
   '/api': typeof AuthenticatedApiRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/billing': typeof AuthenticatedBillingRoute
+  '/channel-monitor': typeof AuthenticatedChannelMonitorRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/cluster': typeof AuthenticatedClusterRoute
   '/database': typeof AuthenticatedDatabaseRoute
@@ -247,6 +255,7 @@ export interface FileRoutesByTo {
   '/api': typeof AuthenticatedApiRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/billing': typeof AuthenticatedBillingRoute
+  '/channel-monitor': typeof AuthenticatedChannelMonitorRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/cluster': typeof AuthenticatedClusterRoute
   '/database': typeof AuthenticatedDatabaseRoute
@@ -282,6 +291,7 @@ export interface FileRoutesById {
   '/_authenticated/api': typeof AuthenticatedApiRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/billing': typeof AuthenticatedBillingRoute
+  '/_authenticated/channel-monitor': typeof AuthenticatedChannelMonitorRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/cluster': typeof AuthenticatedClusterRoute
   '/_authenticated/database': typeof AuthenticatedDatabaseRoute
@@ -318,6 +328,7 @@ export interface FileRouteTypes {
     | '/api'
     | '/audit'
     | '/billing'
+    | '/channel-monitor'
     | '/channels'
     | '/cluster'
     | '/database'
@@ -350,6 +361,7 @@ export interface FileRouteTypes {
     | '/api'
     | '/audit'
     | '/billing'
+    | '/channel-monitor'
     | '/channels'
     | '/cluster'
     | '/database'
@@ -384,6 +396,7 @@ export interface FileRouteTypes {
     | '/_authenticated/api'
     | '/_authenticated/audit'
     | '/_authenticated/billing'
+    | '/_authenticated/channel-monitor'
     | '/_authenticated/channels'
     | '/_authenticated/cluster'
     | '/_authenticated/database'
@@ -466,6 +479,13 @@ declare module '@tanstack/react-router' {
       path: '/billing'
       fullPath: '/billing'
       preLoaderRoute: typeof AuthenticatedBillingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/channel-monitor': {
+      id: '/_authenticated/channel-monitor'
+      path: '/channel-monitor'
+      fullPath: '/channel-monitor'
+      preLoaderRoute: typeof AuthenticatedChannelMonitorRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/channels': {
@@ -651,6 +671,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedApiRoute: typeof AuthenticatedApiRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
+  AuthenticatedChannelMonitorRoute: typeof AuthenticatedChannelMonitorRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedClusterRoute: typeof AuthenticatedClusterRoute
   AuthenticatedDatabaseRoute: typeof AuthenticatedDatabaseRoute
@@ -684,6 +705,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedApiRoute: AuthenticatedApiRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedBillingRoute: AuthenticatedBillingRoute,
+  AuthenticatedChannelMonitorRoute: AuthenticatedChannelMonitorRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedClusterRoute: AuthenticatedClusterRoute,
   AuthenticatedDatabaseRoute: AuthenticatedDatabaseRoute,

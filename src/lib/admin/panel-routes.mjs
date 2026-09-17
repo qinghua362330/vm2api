@@ -22,6 +22,7 @@ import { mergeNotifyConfig, publicNotifyConfig, publicRoutingNotify, sendNotifyT
 import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import { publicUserView } from './panel-users.mjs'
 import { AUDIT_ACTIONS, AuditLog } from './audit-log.mjs'
+import { ChannelMonitor } from './channel-monitor.mjs'
 import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
 import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
 import { BalanceLedger } from '../billing/balance-ledger.mjs'
@@ -856,6 +857,102 @@ export function createPanelHandler(ctx) {
         if (req.method === 'GET' && byUser) {
           const uid = decodeURIComponent(byUser[1])
           return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
+        }
+        return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
+      // ---- 渠道监控 ----
+      if (p === '/api/panel/channel-monitor' || p.startsWith('/api/panel/channel-monitor/')) {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const monitor = new ChannelMonitor()
+        const channels = new ChannelsRepo()
+
+        if (req.method === 'GET' && p === '/api/panel/channel-monitor') {
+          const windowMinutes = Number(url.searchParams.get('window')) || 30
+          const health = monitor.healthByChannel({ windowMinutes })
+          const rows = channels.list().map((channel) => {
+            const buckets = channels.listBucketIds(channel.id)
+            const byEgress = monitor.healthByEgress({ channelId: channel.id, egressIds: buckets, windowMinutes })
+            return {
+              channel_id: channel.id,
+              name: channel.name,
+              status: channel.status,
+              buckets: buckets.map((egressId) => ({ egress_id: egressId, ...byEgress.get(egressId) })),
+              health: health.get(channel.id) || summarizeEmpty(),
+            }
+          })
+          return json(
+            res,
+            200,
+            panel.ok({
+              window_minutes: windowMinutes,
+              channels: rows,
+              rules: monitor.listRules(),
+              events: monitor.listEvents(50),
+            }),
+          )
+        }
+        if (req.method === 'GET' && p === '/api/panel/channel-monitor/probes') {
+          return json(
+            res,
+            200,
+            panel.ok({
+              probes: monitor.probes({
+                channelId: url.searchParams.get('channel_id') ? Number(url.searchParams.get('channel_id')) : null,
+                egressId: url.searchParams.get('egress_id') || null,
+                windowMinutes: Number(url.searchParams.get('window')) || 60,
+                limit: Number(url.searchParams.get('limit')) || 200,
+              }),
+            }),
+          )
+        }
+        if (req.method === 'POST' && p === '/api/panel/channel-monitor/rules') {
+          const body = await readBody(req, 64 * 1024).catch(() => ({}))
+          try {
+            const rule = monitor.createRule(body)
+            audit(req, 'channel_monitor.create_rule', { targetType: 'alert_rule', targetId: rule.id, detail: body })
+            return json(res, 200, panel.ok({ rule }))
+          } catch (error) {
+            return json(res, 400, { ok: false, error: { message: String(error?.message || error), code: 'invalid_rule' } })
+          }
+        }
+        const ruleId = p.match(/^\/api\/panel\/channel-monitor\/rules\/(\d+)$/)
+        if (ruleId) {
+          if (req.method === 'PATCH' || req.method === 'PUT') {
+            const body = await readBody(req, 64 * 1024).catch(() => ({}))
+            const rule = monitor.updateRule(Number(ruleId[1]), body)
+            audit(req, 'channel_monitor.update_rule', { targetType: 'alert_rule', targetId: ruleId[1], detail: body })
+            return json(res, 200, panel.ok({ rule }))
+          }
+          if (req.method === 'DELETE') {
+            const result = monitor.removeRule(Number(ruleId[1]))
+            audit(req, 'channel_monitor.delete_rule', { targetType: 'alert_rule', targetId: ruleId[1] })
+            return json(res, 200, panel.ok(result))
+          }
+        }
+        // Run the rules now, and optionally probe every proxy first so the
+        // evaluation has fresh samples rather than whatever the timer left.
+        if (req.method === 'POST' && p === '/api/panel/channel-monitor/run') {
+          const body = await readBody(req, 16 * 1024).catch(() => ({}))
+          let probe = null
+          if (body.probe === true) {
+            try {
+              probe = await proxyPool.probeAll({ onlyEnabled: true })
+            } catch (error) {
+              probe = { ok: false, error: String(error?.message || error) }
+            }
+          }
+          const result = monitor.runAlerts({})
+          audit(req, 'channel_monitor.run', { detail: { probed: probe?.total ?? null, fired: result.fired.length } })
+          return json(res, 200, panel.ok({ probe, ...result }))
+        }
+        if (req.method === 'POST' && p === '/api/panel/channel-monitor/prune') {
+          const body = await readBody(req, 16 * 1024).catch(() => ({}))
+          const result = monitor.pruneProbes(body.days)
+          audit(req, 'channel_monitor.prune', { detail: { days: body.days, removed: result.removed } })
+          return json(res, 200, panel.ok(result))
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
       }

@@ -1,4 +1,5 @@
 import {
+  Activity,
   Box,
   CalendarClock,
   CreditCard,
@@ -43,6 +44,7 @@ export type ViewId =
   | 'wallet'
   | 'ledger'
   | 'audit'
+  | 'channel-monitor'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -71,6 +73,7 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   wallet: '我的钱包',
   ledger: '余额流水',
   audit: '审计日志',
+  'channel-monitor': '渠道监控',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -104,6 +107,7 @@ export const NAV_ITEMS: {
   { id: 'wallet', url: '/wallet', icon: Wallet },
   { id: 'ledger', url: '/ledger', icon: Receipt },
   { id: 'audit', url: '/audit', icon: ShieldCheck },
+  { id: 'channel-monitor', url: '/channel-monitor', icon: Activity },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },

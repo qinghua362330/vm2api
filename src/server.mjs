@@ -35,6 +35,8 @@ import { OrderService } from './lib/payment/orders.mjs'
 import { PaymentConfigStore } from './lib/payment/config.mjs'
 import { EASYPAY_ACK, easypayTradeSuccess, verifyEasypay, verifyStripeSignature } from './lib/payment/sign.mjs'
 import { EgressBindingsRepo } from './lib/db/repos/egress-bindings-repo.mjs'
+import { ChannelsRepo } from './lib/db/repos/channels-repo.mjs'
+import { ChannelMonitor } from './lib/admin/channel-monitor.mjs'
 import { normalizeOfficialCcConfig } from './lib/oauth/official-cc-bootstrap.mjs'
 import { invalidateLiveCredentialCache } from './lib/admin/panel-live-credentials.mjs'
 import { normalizeHealthProbeConfig, createHealthProbeMonitor, HEALTH_REAL_HEADER } from './lib/admin/health-probe.mjs'
@@ -330,6 +332,20 @@ proxyPool = new ProxyPool({
   },
   onDisconnectVm: (vmId, reason, proxyId) => {
     setVmSchedulable(cfg.paths.project, vmId, false, `${reason}|proxy=${proxyId}`)
+  },
+  // Keep probe history for 渠道监控. The proxy row is a snapshot; this is the series.
+  onProbe: (proxy, result) => {
+    try {
+      const channelId = new ChannelsRepo().channelOfBucket(proxy.id)
+      new ChannelMonitor().recordProbe({
+        channelId,
+        egressId: proxy.id,
+        ok: result?.ok === true,
+        latencyMs: result?.latency_ms ?? null,
+        scope: result?.scope || null,
+        error: result?.error || null,
+      })
+    } catch {}
   },
   onEnableVm: (vmId, _reason, proxyId) => {
     const vm = getVm(cfg.paths.project, vmId)

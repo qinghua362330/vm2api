@@ -211,7 +211,7 @@ export function parseSocks5Line(line) {
 }
 
 export class ProxyPool {
-  constructor({ dataDir, db, onDisableVm, onDisconnectVm, onEnableVm, egressCheck, repairEgress } = {}) {
+  constructor({ dataDir, db, onDisableVm, onDisconnectVm, onEnableVm, egressCheck, repairEgress, onProbe } = {}) {
     this.db = resolveStoreDb({ db, dataDir })
     this.repo = new ProxiesRepo(this.db)
     this.onDisableVm = onDisableVm // (vmId, reason, proxyId) => void
@@ -219,6 +219,9 @@ export class ProxyPool {
     this.onEnableVm = onEnableVm // (vmId, reason, proxyId) => void
     this.egressCheck = egressCheck
     this.repairEgress = repairEgress
+    // Fired after every probe so a monitor can keep history. The proxy row only
+    // holds the latest value; "flaky all morning" needs a series.
+    this.onProbe = typeof onProbe === 'function' ? onProbe : null
     this.state = { config: { ...DEFAULT_CONFIG }, proxies: [] }
     this._timer = null
     this._probing = false
@@ -725,6 +728,11 @@ export class ProxyPool {
         const result = await this.probeOne(p)
         this._applyProbeResult(p, result)
         results.push({ id: p.id, ...result, status: p.status, enabled: p.enabled })
+        try {
+          this.onProbe?.(p, result)
+        } catch {
+          /* a monitor must never break the probe loop */
+        }
       }
       this.save()
       return { ok: true, total: results.length, results }
