@@ -236,3 +236,24 @@ test('面板详情对 codex 槽仍然正常（kernel 健康走 codex-kernel）',
     f.cleanup()
   }
 })
+
+test('Claude 池不会去问 codex 槽的 worker（坐标按类型，健康探测直接短路）', async () => {
+  const { PoolScheduler } = await import('../../src/lib/pool/pool-scheduler.mjs')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kin-codex-pool-'))
+  try {
+    const scheduler = new PoolScheduler({
+      projectRoot: dir,
+      workerHealth: async () => {
+        throw new Error('不该走到这里：codex 槽没有 go worker')
+      },
+    })
+    const exec = scheduler.executionContext(CODEX_VM, 'acc-1')
+    assert.equal(exec.kind, 'codex')
+    assert.equal(exec.homeDir, path.join(dir, 'vms', 'vm-03', 'codex-home'))
+    const health = await scheduler.getWorkerHealth(exec)
+    assert.equal(health.code, CODEX_SLOT_NOT_WORKER)
+    assert.equal(health.source, 'codex-slot')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

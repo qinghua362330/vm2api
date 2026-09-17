@@ -1,5 +1,7 @@
 import { getVm, listVms, setVmSchedulable } from '../vm/vm-registry.mjs'
 import { vmCliHomePath, vmJsonPath } from '../vm/execution-context.mjs'
+import { slotExec } from '../vm/slot-runtime.mjs'
+import { CODEX_SLOT_NOT_WORKER, CODEX_SLOT_NOT_WORKER_MESSAGE, isCodexExec } from '../transport/go-worker-client.mjs'
 import {
   expiresAtToMs,
   hasRefreshPresence,
@@ -468,12 +470,17 @@ export class PoolScheduler {
   }
 
   executionContext(vm, accountId) {
-    const homeDir = vmCliHomePath(this.projectRoot, vm.id)
+    // 坐标按类型给：codex 槽的 home 是 codex-home，不是 cli-home。Claude 池正常
+    // 情况下不会走到 codex 槽（checkEligibility 的 evaluateSlotGate 已拦），
+    // 但坐标对了，误入时至少报的是"协议不对"而不是"worker 掉了"。
+    const base = slotExec(this.projectRoot, vm)
+    const homeDir = base?.homeDir || vmCliHomePath(this.projectRoot, vm.id)
     const slot = readSlotCredentialIdentity(homeDir)
     return {
       vmId: vm.id,
       accountId,
       vm,
+      kind: base?.kind || 'claude',
       vmPath: vmJsonPath(this.projectRoot, vm.id),
       homeDir,
       oauth: {
@@ -490,6 +497,10 @@ export class PoolScheduler {
   }
 
   async getWorkerHealth(exec, { signal } = {}) {
+    // codex 槽没有 go worker：别去连 worker.sock，也别把它写成 worker_unhealthy
+    if (isCodexExec(exec)) {
+      return { ok: false, code: CODEX_SLOT_NOT_WORKER, error: CODEX_SLOT_NOT_WORKER_MESSAGE, source: 'codex-slot' }
+    }
     if (typeof this.workerHealth !== 'function') {
       return { ok: true, source: 'scheduler-no-health-provider' }
     }
