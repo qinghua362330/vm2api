@@ -178,6 +178,13 @@ export function createHandleProtocol(deps) {
     const originalCode = result?.body?.error?.code || fallbackCode
     const originalMessage = result?.body?.error?.message || null
     const details = result?.body?.error?.details || {}
+    // 网关自己下的结论（例如"这套部署没有可用的 Claude 槽"）不是上游错误：原样透出，
+    // 否则会被上游映射器压成 upstream_error + 通用措辞，客户端不知道该改什么。
+    if (details.gateway_local === true && result?.body?.error?.message) {
+      logBag.error_code = originalCode
+      logBag.error_message = originalMessage
+      return { status: result?.status || 503, body: result.body }
+    }
     const mapped = rewritePoolErrorForClient(
       mapUpstreamError(result?.status || 503, result?.body, result?.headers || {}),
       result?.body,

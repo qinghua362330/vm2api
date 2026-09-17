@@ -1,10 +1,7 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { classifyUpstreamResult, repairAnthropicRequest, shouldContinue } from './upstream-error-policy.mjs'
 import { hasRefreshPresence } from '../oauth/oauth-credentials.mjs'
 import { resolveOfficialCcInference } from '../vm/slot-engine.mjs'
-import { listVms } from '../vm/vm-registry.mjs'
-import { isCodexVm } from '../vm/vm-kind.mjs'
+import { servableSlotKinds } from '../vm/slot-kinds.mjs'
 
 const DEFAULTS = {
   max_account_switches: 10,
@@ -202,14 +199,11 @@ export class FailoverRunner {
   hasClaudeSlot() {
     const projectRoot = this.scheduler?.projectRoot
     if (!projectRoot) return true
+    const { kinds, readable } = servableSlotKinds(projectRoot)
     // 读不到槽目录 = "不知道"，按老行为走（宁可让 failover 去排队，也不能把正常
     // 请求误判成"这套部署没有 Claude 槽"）
-    if (!fs.existsSync(path.join(projectRoot, 'vms'))) return true
-    try {
-      return listVms(projectRoot).some((vm) => !isCodexVm(vm))
-    } catch {
-      return true
-    }
+    if (!readable) return true
+    return kinds.has('claude')
   }
 
   forgetCredential(selected, policy) {
@@ -313,8 +307,11 @@ export class FailoverRunner {
         if (!this.hasClaudeSlot()) {
           return poolError(
             'no_claude_slot',
-            '本部署没有可用的 Claude 槽（当前槽都是 codex）：Claude 形状的请求无法服务，请改用 OpenAI 形状（/v1/responses 或 /v1/chat/completions）',
-            { reason: selected?.reason || 'no_claude_slot', eligible: selected?.eligible ?? 0 },
+            '本部署没有可用的 Claude 槽：Claude 形状的请求（/v1/messages、Claude Code）无法服务。请改用 OpenAI 形状（/v1/responses 或 /v1/chat/completions），或先给 Claude 槽导入凭证',
+            // gateway_local：这是我们自己的结论，不是上游错误 —— 别让上游错误映射器
+            // 把 code/message 换成通用的 upstream_error。内部原因（reason/eligible）
+            // 不进响应：客户端要的是"该怎么办"，不是我们的池子细节。
+            { gateway_local: true },
           )
         }
         return preferLastResult(

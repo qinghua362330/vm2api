@@ -188,6 +188,61 @@ export function toCodexResponses(protocol, body, convert = {}) {
   return { ok: false, code: 'protocol_not_allowed' }
 }
 
+/** 从 Responses 结果里抠出正文（output_text 优先，其次 output[].content[].text）。 */
+export function responsesTextOf(body = {}) {
+  const r = body?.response && typeof body.response === 'object' ? body.response : body
+  const direct = r?.output_text
+  if (typeof direct === 'string' && direct) return direct
+  if (Array.isArray(r?.output)) {
+    return r.output
+      .flatMap((item) => (Array.isArray(item?.content) ? item.content : []))
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .join('')
+  }
+  return ''
+}
+
+/**
+ * 非流式的 `/v1/chat/completions`。
+ *
+ * 流式那条路早就把 Codex 事件翻成 `chat.completion.chunk` 了，但非流式直接把
+ * Responses 对象原样回给客户端（`{"response":{...,"output_text":"ok"}}`）——
+ * OpenAI SDK 解析不出 `choices`，等于这个端点对"OpenAI 兼容"客户端是坏的。
+ * 既然要发 key 出去，这个形状必须对。
+ */
+export function responsesToChatCompletion(body = {}, { model = null, id = null } = {}) {
+  const r = body?.response && typeof body.response === 'object' ? body.response : body
+  const usage = openaiChatUsage(r?.usage || body?.usage)
+  return {
+    id: id || r?.id || `chatcmpl-${Date.now().toString(36)}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: model || r?.model || null,
+    choices: [
+      {
+        index: 0,
+        message: { role: 'assistant', content: responsesTextOf(body) },
+        finish_reason: 'stop',
+      },
+    ],
+    ...(usage ? { usage } : {}),
+  }
+}
+
+/** 非流式的 `/v1/completions`（老文本补全形状）。 */
+export function responsesToTextCompletion(body = {}, { model = null, id = null } = {}) {
+  const r = body?.response && typeof body.response === 'object' ? body.response : body
+  const usage = openaiChatUsage(r?.usage || body?.usage)
+  return {
+    id: id || r?.id || `cmpl-${Date.now().toString(36)}`,
+    object: 'text_completion',
+    created: Math.floor(Date.now() / 1000),
+    model: model || r?.model || null,
+    choices: [{ index: 0, text: responsesTextOf(body), finish_reason: 'stop' }],
+    ...(usage ? { usage } : {}),
+  }
+}
+
 export function responsesSseToChatChunk(line, id = 'codex') {
   const trimmed = String(line || '').trim()
   if (!trimmed.startsWith('data:')) return null

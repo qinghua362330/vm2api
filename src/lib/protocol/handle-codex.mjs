@@ -5,7 +5,12 @@ import path from 'node:path'
 import { getVm, listVms } from '../vm/vm-registry.mjs'
 import { isCodexProtocolAllowed, isCodexVm, normalizeCodexRouting } from './codex-route.mjs'
 import { restrictCodexClient } from './codex-restriction.mjs'
-import { responsesSseToChatChunk, toCodexResponses } from './codex-convert.mjs'
+import {
+  responsesSseToChatChunk,
+  responsesToChatCompletion,
+  responsesToTextCompletion,
+  toCodexResponses,
+} from './codex-convert.mjs'
 import { streamCodexKernel } from '../transport/codex-kernel-client.mjs'
 import { ensureCodexKernel, writeCodexKernelConfig } from '../transport/codex-kernel-supervisor.mjs'
 import { codexBinPath, streamCodexCli } from '../transport/codex-cli-client.mjs'
@@ -495,6 +500,12 @@ export async function handleCodexProtocol({
   logBag.final_state = result.terminalState || 'verified'
   logBag.upstream_model = converted.body.model
   if (!stream) {
+    // 入站是 OpenAI 兼容形状时，回给客户端的也必须是那个形状：非流式以前原样回
+    // Responses 对象（`{"response":{...}}`），OpenAI SDK 拿不到 choices 就报错。
+    const model = converted?.body?.model || outboundBody?.model || null
+    if (protocol === 'openai.chat') return json(res, 200, responsesToChatCompletion(result.body || {}, { model }))
+    if (protocol === 'openai.completions')
+      return json(res, 200, responsesToTextCompletion(result.body || {}, { model }))
     return json(res, 200, result.body)
   }
   if (!res.headersSent) writeSSEHeaders(res)

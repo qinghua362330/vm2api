@@ -35,14 +35,28 @@ test('只有 codex 槽时：报 no_claude_slot 而不是号池负载过高', () 
   }
 })
 
-test('有 Claude 槽时保持老行为（交给 failover 排队/重试）', () => {
+test('有带凭证的 Claude 槽时保持老行为（交给 failover 排队/重试）', () => {
   const dir = fixture([
-    { id: 'vm-01', platform: 'anthropic', status: 'running' },
+    { id: 'vm-01', platform: 'anthropic', status: 'running', claude: { has_access: true } },
     { id: 'vm-03', platform: 'openai', family: 'codex', status: 'running' },
   ])
   try {
     const r = runner(dir)
     assert.equal(r.hasClaudeSlot(), true)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('只有"空的 Claude 种子槽"（没导过凭证）也算没有 Claude 服务', () => {
+  // 线上就有这么一个 vm-01：anthropic、停着、从没导过凭证。按类型判会得出
+  // "有 Claude 服务"，于是 Claude 请求回"号池负载过高" —— 客户端只会白重试。
+  const dir = fixture([
+    { id: 'vm-01', platform: 'anthropic', status: 'stopped' },
+    { id: 'vm-03', platform: 'openai', family: 'codex', status: 'running' },
+  ])
+  try {
+    assert.equal(runner(dir).hasClaudeSlot(), false)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

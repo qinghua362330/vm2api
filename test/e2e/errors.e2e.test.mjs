@@ -20,8 +20,12 @@ test('VM without credentials is excluded and pool fails closed', async () => {
     })
     assert.equal(r.status, 503, r.text)
     const blob = JSON.stringify(r.json)
-    assert.match(blob, /号池负载过高/)
-    assert.equal(r.json?.error?.code, 'server_overloaded')
+    // 没有**可用**的 Claude 槽 ≠ 号池在排队：这里回"稍后再试"会让客户端一直重试一条
+    // 永远不可能成功的路。措辞变了，但两条纪律没变：失败要 fail closed、不能把内部
+    // 错误码漏给客户端。
+    assert.equal(r.json?.error?.code, 'no_claude_slot', r.text)
+    assert.match(blob, /没有可用的 Claude 槽/)
+    assert.match(blob, /\/v1\/responses/)
     assert.doesNotMatch(blob, /eligible|no ready api|account_pool_exhausted/i)
   } finally {
     await gw.stop()

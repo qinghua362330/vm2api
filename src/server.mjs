@@ -22,7 +22,7 @@ import {
 } from './lib/core/security.mjs'
 import { loadModelPolicy } from './lib/protocol/model-policy.mjs'
 import { gatewayModelCatalog } from './lib/protocol/models.mjs'
-import { isCodexVm } from './lib/vm/vm-kind.mjs'
+import { servableSlotKinds } from './lib/vm/slot-kinds.mjs'
 import {
   createCredentialRefreshMonitor,
   normalizeCredentialRefreshConfig,
@@ -729,15 +729,16 @@ function requireAuth(req, res) {
   return true
 }
 
-/** 这套部署真的有哪种槽：目录按它过滤，免得客户端照着列表选到做不了的模型。 */
+/**
+ * 目录按"这套部署真能服务哪种槽"过滤，免得客户端照着列表选到做不了的模型。
+ *
+ * 一个都服务不了（刚装好、还没导凭证）时返回 null = 不过滤：那种情况下把目录清空
+ * 只会让人以为坏了。
+ */
 function availableSlotKinds() {
-  try {
-    const kinds = new Set()
-    for (const vm of listVms(cfg.paths.project)) kinds.add(isCodexVm(vm) ? 'codex' : 'claude')
-    return kinds
-  } catch {
-    return null
-  }
+  const { kinds, readable } = servableSlotKinds(cfg.paths.project)
+  if (!readable || !kinds.size) return null
+  return kinds
 }
 
 function fetchWorkerModels() {
