@@ -23,6 +23,7 @@ import { EgressBindingsRepo } from '../db/repos/egress-bindings-repo.mjs'
 import { publicUserView } from './panel-users.mjs'
 import { AUDIT_ACTIONS, AuditLog } from './audit-log.mjs'
 import { ChannelMonitor } from './channel-monitor.mjs'
+import { OpsDashboard } from './ops-dashboard.mjs'
 import { ChannelsRepo } from '../db/repos/channels-repo.mjs'
 import { channelOverview, priceForModel } from '../pool/channel-distribution.mjs'
 import { BalanceLedger } from '../billing/balance-ledger.mjs'
@@ -859,6 +860,18 @@ export function createPanelHandler(ctx) {
           return json(res, 200, panel.ok({ usage: subs.usage(uid), history: subs.allOf(uid) }))
         }
         return json(res, 404, makeError({ type: ErrorType.INVALID_REQUEST, code: 'not_found', message: p }))
+      }
+      // ---- 运营大盘 ----
+      if (req.method === 'GET' && p === '/api/panel/ops') {
+        const ident = panelIdentity(req)
+        if (ident.role !== 'admin' && ident.role !== 'super') {
+          return json(res, 403, makeError({ type: ErrorType.PERMISSION, code: 'forbidden', message: 'admin required' }))
+        }
+        const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 30))
+        // Fleet numbers come from the same summaries the scheduler reads, so the
+        // dashboard cannot disagree with what is actually selectable.
+        const vms = listVms(cfg.paths.project)
+        return json(res, 200, panel.ok(new OpsDashboard().snapshot({ vms, days })))
       }
       // ---- 渠道监控 ----
       if (p === '/api/panel/channel-monitor' || p.startsWith('/api/panel/channel-monitor/')) {

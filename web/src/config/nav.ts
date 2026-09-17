@@ -22,6 +22,7 @@ import {
   Shield,
   ShieldCheck,
   Ticket,
+  TrendingUp,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -45,6 +46,7 @@ export type ViewId =
   | 'ledger'
   | 'audit'
   | 'channel-monitor'
+  | 'ops'
   | 'models'
   | 'loadtest'
   | 'protocol'
@@ -74,6 +76,7 @@ export const VIEW_TITLES: Record<ViewId, string> = {
   ledger: '余额流水',
   audit: '审计日志',
   'channel-monitor': '渠道监控',
+  ops: '运营大盘',
   models: '模型',
   loadtest: '压测',
   protocol: '协议',
@@ -108,6 +111,7 @@ export const NAV_ITEMS: {
   { id: 'ledger', url: '/ledger', icon: Receipt },
   { id: 'audit', url: '/audit', icon: ShieldCheck },
   { id: 'channel-monitor', url: '/channel-monitor', icon: Activity },
+  { id: 'ops', url: '/ops', icon: TrendingUp },
   { id: 'models', url: '/models', icon: List },
   { id: 'loadtest', url: '/loadtest/reports', icon: Gauge },
   { id: 'protocol', url: '/protocol', icon: Box },
