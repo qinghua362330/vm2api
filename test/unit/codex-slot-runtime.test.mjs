@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   CODEX_BIN_IN_CONTAINER,
+  CODEX_CODE_MODE_BIN_IN_CONTAINER,
   CODEX_HOME_IN_CONTAINER,
   codexContainerName,
   destroyCodexSlotRuntime,
@@ -94,6 +95,8 @@ function codexSlot(project, id = 'vm-7') {
   const bin = path.join(project, 'bin', 'codex')
   fs.mkdirSync(path.dirname(bin), { recursive: true })
   fs.writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 })
+  // code mode 的伴生二进制（官方包里有；缺了 CLI 只降级告警）
+  fs.writeFileSync(path.join(project, 'bin', 'codex-code-mode-host'), '#!/bin/sh\n', { mode: 0o755 })
   return { vm, bin }
 }
 
@@ -195,6 +198,8 @@ test('启动 codex 槽：参数与 Claude 槽逐条对齐，挂的是 codex 的�
     // 运行目录必须挂上：kernel 的 config 与 socket 都在这儿，漏了它容器里的 kernel
     // 会报 "config: No such file or directory"，而 Node 侧只会看到 health_timeout
     assert.match(joined, new RegExp(`-v [^ ]*vms/vm-7/run:/run/kin`))
+    // code mode 的伴生二进制：有就挂，否则 CLI 会降级告警
+    assert.match(joined, new RegExp(`-v [^ ]*codex-code-mode-host:${CODEX_CODE_MODE_BIN_IN_CONTAINER}:ro`))
     assert.match(joined, new RegExp(`-e CODEX_HOME=${CODEX_HOME_IN_CONTAINER}`))
     // 出口由透明网络承担：网络必须是 egress 建出来的那个，且**不能**注入 ALL_PROXY
     // （网络已经把出站重定向到本地网关，再给一个代理地址就是双重代理，实测不通）
@@ -535,6 +540,27 @@ test('透明出口建不起来就拒绝启动（不能悄悄从宿主 IP 出去�
       false,
       '出口没到位时不应创建容器',
     )
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('没有 code-mode 伴生二进制时不挂它（不能让 docker run 挂一个不存在的路径）', () => {
+  const project = tmp()
+  try {
+    const { vm, bin } = codexSlot(project)
+    fs.rmSync(path.join(project, 'bin', 'codex-code-mode-host'), { force: true })
+    const docker = fakeDocker()
+    const started = startCodexSlotRuntime(vm, project, {
+      image: 'kin-os/ubuntu:24.04',
+      codexBin: bin,
+      shImpl: docker.shImpl,
+      inspectImpl: docker.inspectImpl,
+      ensureEgress: () => ({ ok: true, network: 'kin-eg-proxy-7' }),
+    })
+    if (!started.ok) return
+    const run = docker.calls.find((args) => args.slice(0, 3).join(' ') === 'docker run -d')
+    assert.equal(run.join(' ').includes('codex-code-mode-host'), false)
   } finally {
     fs.rmSync(project, { recursive: true, force: true })
   }

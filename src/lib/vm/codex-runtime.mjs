@@ -35,6 +35,8 @@ export const CODEX_HOME_IN_CONTAINER = '/home/kincli/.codex'
 export const CODEX_SLOT_HOME_IN_CONTAINER = '/home/kincli'
 export const CODEX_BIN_IN_CONTAINER = '/usr/local/bin/codex'
 export const CODEX_KERNEL_BIN_IN_CONTAINER = '/usr/local/bin/kin-codex-kernel'
+/** CLI 的 code mode 需要这个伴生二进制；缺了 CLI 会降级并告警。 */
+export const CODEX_CODE_MODE_BIN_IN_CONTAINER = '/usr/local/bin/codex-code-mode-host'
 const GID = String(process.env.KIN_VM_GID || 987)
 const UID_BASE = Number(process.env.KIN_VM_UID_BASE || 10000)
 const SLOT_MEMORY = process.env.KIN_VM_MEMORY || '500m'
@@ -171,6 +173,7 @@ export function startCodexSlotRuntime(
   const homeInSlot = codexHomeDir(projectRoot, vm.id)
   // 声明在最前面：下面的"已在跑/已停止"早返回分支也要用它
   const kernelBin = String(process.env.KIN_CODEX_KERNEL_BIN || '').trim() || codexKernelBinPath() || ''
+  const codeModeBin = existingFile(path.join(path.dirname(String(codexBin || pre.bin || '')), 'codex-code-mode-host'))
   // 出口：先把透明网关拉起来（Claude 槽在 startVmRuntime 里做同一件事）。缺这一步时容器
   // 虽然接上了 `kin-eg-*` 网络，但那套重定向后面没有网关，而 ALL_PROXY 又是双重代理 ——
   // 实测两头都不通（容器里 curl 直接 000）。
@@ -263,6 +266,8 @@ export function startCodexSlotRuntime(
     // kernel 二进制同理：存在才挂（与 Claude 的 kin-kernel 挂载条件一致），
     // 挂上之后 kernel 就在槽里跑，配置/socket 经 /run/kin 共享
     ...(kernelBin ? ['-v', `${kernelBin}:${CODEX_KERNEL_BIN_IN_CONTAINER}:ro`] : []),
+    // code mode 的伴生二进制（有才挂）：缺了 CLI 只降级告警，但槽里没必要留个半残特性
+    ...(codeModeBin ? ['-v', `${codeModeBin}:${CODEX_CODE_MODE_BIN_IN_CONTAINER}:ro`] : []),
     // 配置与 socket 的共享目录：kernel 读 /run/kin/codex-kernel.json、建
     // /run/kin/codex-kernel.sock，宿主侧看到的就是 vms/<id>/run 下的同名文件
     '-v',
@@ -303,6 +308,18 @@ export function startCodexSlotRuntime(
     action: 'created',
     runtime: runtimePatchOf(vm, info, { kernelMounted: !!kernelBin }),
     preflight: pre,
+  }
+}
+
+/** 存在即可读的文件（用于可选挂载）。 */
+function existingFile(file) {
+  const target = String(file || '').trim()
+  if (!target) return ''
+  try {
+    fs.accessSync(target, fs.constants.R_OK)
+    return target
+  } catch {
+    return ''
   }
 }
 

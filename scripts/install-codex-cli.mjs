@@ -55,26 +55,39 @@ try {
   })
 
   const vendorRoot = path.join(workDir, 'node_modules', '@openai')
-  const candidates = []
+  const binDirs = []
   for (const entry of fs.existsSync(vendorRoot) ? fs.readdirSync(vendorRoot) : []) {
     const base = path.join(vendorRoot, entry, 'vendor')
     if (!fs.existsSync(base)) continue
     for (const triple of fs.readdirSync(base)) {
-      const bin = path.join(base, triple, 'bin', 'codex')
-      if (fs.existsSync(bin)) candidates.push(bin)
+      const dir = path.join(base, triple, 'bin')
+      if (fs.existsSync(path.join(dir, 'codex'))) binDirs.push(dir)
     }
   }
-  if (!candidates.length) {
+  if (!binDirs.length) {
     console.error('[codex-cli] 没找到 codex 可执行文件，安装目录结构与预期不符')
     process.exit(1)
   }
 
+  const binDir = binDirs[0]
   const dest = path.join(ROOT, 'bin', 'codex')
   fs.mkdirSync(path.dirname(dest), { recursive: true })
-  fs.copyFileSync(candidates[0], dest)
+  fs.copyFileSync(path.join(binDir, 'codex'), dest)
   fs.chmodSync(dest, 0o755)
   const shown = execFileSync(dest, ['--version'], { encoding: 'utf8' }).trim()
   console.log(`[codex-cli] 已安装到 ${path.relative(ROOT, dest)}（${shown}）`)
+
+  // code-mode host：CLI 的 code mode 要它，缺了会警告 "Code Mode is unavailable … fail
+  // closed"（不影响普通对话，但槽里多一个静默降级的特性）。有就一起装。
+  const codeModeSrc = path.join(binDir, 'codex-code-mode-host')
+  if (fs.existsSync(codeModeSrc)) {
+    const codeModeDest = path.join(ROOT, 'bin', 'codex-code-mode-host')
+    fs.copyFileSync(codeModeSrc, codeModeDest)
+    fs.chmodSync(codeModeDest, 0o755)
+    console.log(`[codex-cli] 附带安装了 ${path.relative(ROOT, codeModeDest)}（code mode）`)
+  } else {
+    console.log('[codex-cli] 该版本没有 codex-code-mode-host，跳过（code mode 会在槽里降级）')
+  }
   console.log('[codex-cli] routing.codex.engine = auto 现在会走真 CLI；要回退就设成 "http"。')
 } finally {
   fs.rmSync(workDir, { recursive: true, force: true })

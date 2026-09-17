@@ -155,6 +155,27 @@ claude 槽（codex 槽返回 `codex_vm`），Codex 池要 codex 槽（claude 槽
 驱动侧按容器是否在跑来选执行位置：容器在跑 → `docker exec -i <container> codex exec --json`；
 没有容器 → 退回宿主进程（老环境不至于因此不可用）。
 
+## 首次真机部署踩到并修掉的坑（都有测试）
+
+| 症状 | 真因 |
+|---|---|
+| 槽选不中，报 `no_codex_slot` | `slotHasBoundProxy` 要求 Claude 专属的 `proxy_cli_enabled`；codex 槽只看绑定本身 |
+| 代理明明配了却连不上 | `http://…` 行被解析成 `username='http'`（静默存坏记录）——现在显式拒绝并提示改 `socks5h://` |
+| 内核起不来，只回 `health_timeout` | 容器漏挂 `/run/kin`；超时后改前台探一次，把 `config: No such file or directory` 带回来 |
+| `Permission denied` 一串 | 宿主以 root 写的 home/配置/凭证没交给槽 uid（10000+序号:987） |
+| 同上，凭证仍读不到 | 容器内路径被拿去 chown 宿主文件（静默失败）→ 宿主那份交给 `chownCodexHome()` |
+| CLI 告警 `could not create PATH aliases` | 容器 `$HOME` 不可写：整份 home 挂到 `/home/kincli`，状态放 `.codex/` |
+| `No prompt provided via stdin` | `codex exec … -` 是读 stdin，而 spawn 用了 `'ignore'` |
+| 请求卡 5 分钟无输出 | 透明出口网关从没为 codex 起过，且 `ALL_PROXY` 造成双重代理 → 先 `ensureProxyEgress`，不再注入代理变量 |
+| 客户端收到两条失败帧 | CLI 同时发 `error` 与 `turn.failed`，翻译层去重 |
+
+## 模型清单是账号驱动的
+
+`/v1/models` 里的 GPT 部分不是写死的策略表，而是导入凭证时（以及面板"同步目录"时）
+由 `syncCodexCatalog()` 从 `chatgpt.com/backend-api/codex/models` 拉下来、写进
+`gpt_model_policy`（`source: codex`）的。`luna` / `wm` 这类 slug 会被**故意过滤**——
+Codex 账号请求它们会 400。
+
 ## 尚未做（下一步）
 
 1. 常驻 `codex app-server`（省掉每请求冷启动）；
