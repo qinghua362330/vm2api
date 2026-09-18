@@ -229,35 +229,9 @@ export function codexEventsToSse(events, state) {
       ensureCreated()
       closeMessage()
       const usage = event.usage && typeof event.usage === 'object' ? event.usage : null
-      if (usage) {
-        state.usage = {
-          input_tokens: Number(usage.input_tokens) || 0,
-          output_tokens: Number(usage.output_tokens) || 0,
-          input_tokens_details: {
-            cached_tokens: Number(usage.cached_input_tokens) || 0,
-            cache_write_tokens: Number(usage.cache_write_input_tokens) || 0,
-          },
-          output_tokens_details: { reasoning_tokens: Number(usage.reasoning_output_tokens) || 0 },
-        }
-      }
-      push('response.completed', {
-        response: {
-          id: state.id,
-          object: 'response',
-          model: state.model,
-          status: 'completed',
-          output: [
-            {
-              type: 'message',
-              id: state.itemId,
-              role: 'assistant',
-              content: [{ type: 'output_text', text: state.text }],
-            },
-          ],
-          output_text: state.text,
-          usage: state.usage || undefined,
-        },
-      })
+      if (usage) state.usage = responsesUsage(usage)
+      // 形状与"必须给全 usage"的理由都写在 responsesResponse/responsesUsage 上
+      push('response.completed', { response: responsesResponse(state) })
       continue
     }
     if (type === 'turn.failed' || type === 'error') {
@@ -284,6 +258,51 @@ export function codexEventsToSse(events, state) {
     }
   }
   return out
+}
+
+/**
+ * Responses 形状的 usage。
+ *
+ * codex-rs 的 `Usage` 结构体里 `total_tokens`、`input_tokens_details`、
+ * `output_tokens_details` 都是**必填**（没有 serde default）。少一个字段，Codex
+ * 客户端就会 `failed to parse ResponseCompleted: missing field \`total_tokens\``，
+ * 表现为流被掐断 —— 而我们的 CLI 上报里只有 input/output/cached，没有 total。
+ */
+export function responsesUsage(usage = null) {
+  const u = usage && typeof usage === 'object' ? usage : {}
+  const input = Number(u.input_tokens) || 0
+  const output = Number(u.output_tokens) || 0
+  const cached = Number(u.cached_input_tokens ?? u.input_tokens_details?.cached_tokens) || 0
+  const cacheWrite = Number(u.cache_write_input_tokens ?? u.input_tokens_details?.cache_write_tokens) || 0
+  const reasoning = Number(u.reasoning_output_tokens ?? u.output_tokens_details?.reasoning_tokens) || 0
+  return {
+    input_tokens: input,
+    input_tokens_details: { cached_tokens: cached, cache_write_tokens: cacheWrite },
+    output_tokens: output,
+    output_tokens_details: { reasoning_tokens: reasoning },
+    total_tokens: input + output,
+  }
+}
+
+/** Responses 形状的完整 response 对象（流式 completed 帧与非流式 body 共用）。 */
+export function responsesResponse(state = {}) {
+  const text = String(state.text || '')
+  return {
+    id: state.id,
+    object: 'response',
+    model: state.model || null,
+    status: 'completed',
+    output: [
+      {
+        type: 'message',
+        id: state.itemId,
+        role: 'assistant',
+        content: [{ type: 'output_text', text }],
+      },
+    ],
+    output_text: text,
+    usage: state.usage || responsesUsage(null),
+  }
 }
 
 /**
@@ -549,7 +568,7 @@ export async function streamCodexCli({
       status: ok ? 200 : 502,
       // 只有失败且一个字都没发出去时，调用方才能安全地改写成 JSON 错误。
       body: ok
-        ? { response: { id: state.id, output_text: state.text } }
+        ? { response: responsesResponse(state) }
         : {
             error: {
               type: 'api_error',

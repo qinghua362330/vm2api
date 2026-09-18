@@ -152,6 +152,10 @@ test('一次完整回合翻译成 Responses SSE 序列', () => {
   assert.equal(completed.response.usage.input_tokens, 11)
   assert.equal(completed.response.usage.input_tokens_details.cached_tokens, 3)
   assert.equal(completed.response.usage.output_tokens_details.reasoning_tokens, 2)
+  // codex-rs 的 Usage 把 total_tokens / *_tokens_details 当必填：少一个字段，客户端
+  // 就 `failed to parse ResponseCompleted: missing field \`total_tokens\`` 把流掐断
+  assert.equal(completed.response.usage.total_tokens, 18)
+  assert.equal(completed.response.usage.output_tokens, 7)
   // 非致命的 item.error 不能被当成请求失败
   assert.equal(types.includes('response.failed'), false)
 })
@@ -680,4 +684,25 @@ test('一次失败只发一个 response.failed（CLI 会同时给 error 与 turn
   )
   assert.equal(events.filter((event) => event.type === 'response.failed').length, 1)
   assert.match(state.error, /at capacity/)
+})
+
+test('response.completed 的 usage 永远完整（上游没报 usage 时补零，不缺字段）', () => {
+  const state = newCodexStreamState({ id: 'resp_nousage', model: 'gpt-5.6-terra' })
+  const events = sseEvents(
+    codexEventsToSse(
+      [
+        { type: 'turn.started' },
+        { type: 'item.completed', item: { id: 'item_1', type: 'agent_message', text: 'ok' } },
+        { type: 'turn.completed' },
+      ],
+      state,
+    ),
+  )
+  const usage = events.at(-1)?.response?.usage
+  assert.ok(usage, 'completed 帧必须带 usage（Codex 客户端会 parse 它）')
+  for (const key of ['input_tokens', 'output_tokens', 'total_tokens']) {
+    assert.equal(typeof usage[key], 'number', `usage.${key} 必须是数字`)
+  }
+  assert.ok(usage.input_tokens_details && usage.output_tokens_details, '两个 details 子对象都必须在')
+  assert.equal(usage.total_tokens, usage.input_tokens + usage.output_tokens)
 })
