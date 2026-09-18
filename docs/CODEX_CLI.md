@@ -261,4 +261,9 @@ model=gpt-5.5  status=502  error_code=codex_cli_failed  via=codex-cli  vm_id=vm-
 3. 建槽向导里把类型做成显式选项（现在 `kind=codex` 已可用，前端入口还是"导入凭证"
    那条路）；
 4. codex 槽的身份采集：需要在 `kin-codex-kernel` 里补 `/internal/identity`
-   （现在面板如实回 `identity_unsupported_for_codex`，不再假装能采）。
+   （现在面板如实回 `identity_unsupported_for_codex`，不再假装能采）；
+5. `http` 引擎（`kin-codex-kernel`）的 `response.completed` 帧目前是
+   `{"type":"response.completed"}` —— **没有 `response` 对象**。Codex 客户端会按
+   `ResponseCompleted { response }` 解析，接上去就会报缺字段。当前线上跑的是 `cli`
+   引擎（那条路已补齐完整 usage），只有把 `routing.codex.engine` 切成 `http` 时才会撞到；
+   切换前要先把这个帧补齐。
